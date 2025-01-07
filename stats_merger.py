@@ -1,4 +1,4 @@
-def merger_5leagues(export_format='csv'):
+def merger_5leagues(export_format='csv', return_df=False):
     ## Leer los CSV 
     import pandas as pd
     import numpy as np
@@ -122,7 +122,7 @@ def merger_5leagues(export_format='csv'):
     ]
     final_merged_df = final_merged_df.drop(columns=columns_to_drop)
 
-    # Define the file path
+    # Define the file path and export based on format
     if export_format == 'csv':
         file_path = 'final_fbref_all5_columns.csv'
         final_merged_df.to_csv(file_path, index=False)
@@ -137,13 +137,11 @@ def merger_5leagues(export_format='csv'):
     print(f"File has been saved at: {os.path.abspath(file_path)}")
     print("Done, all 5 leagues have been merged.")
 
+    # Return DataFrame if requested
+    if return_df:
+        return final_merged_df
 
-merger_5leagues()
-
-###########################################################################################
-
-
-def standard_stats(export_format='csv'):
+def standard_stats(export_format='csv', return_df=False):
     import requests
     import pandas as pd
     from unidecode import unidecode
@@ -292,7 +290,7 @@ def standard_stats(export_format='csv'):
         for col in dfstandard.columns
     ]
 
-    # Define the file path
+    # Define the file path and export based on format
     if export_format == 'csv':
         file_path = 'fbrefBig5standard.csv'
         dfstandard.to_csv(file_path, encoding='utf-8', index=False)
@@ -307,10 +305,11 @@ def standard_stats(export_format='csv'):
     print(f"File has been saved at: {os.path.abspath(file_path)}")
     print("Done, the data has been scraped and saved.")
 
+    # Return DataFrame if requested
+    if return_df:
+        return dfstandard
 
-
-
-def shooting_stats(export_format='csv'):
+def shooting_stats(export_format='csv', return_df=False):
     import requests
     import pandas as pd
     from unidecode import unidecode
@@ -353,7 +352,7 @@ def shooting_stats(export_format='csv'):
     dfshoot['Player'] = dfshoot['Player'].apply(unidecode)
     dfshoot['Squad'] = dfshoot['Squad'].apply(unidecode)
 
-    # Define the file path
+    # Define the file path and export based on format
     if export_format == 'csv':
         file_path = 'fbrefBig5Shoot.csv'
         dfshoot.to_csv(file_path, index=False)
@@ -368,9 +367,11 @@ def shooting_stats(export_format='csv'):
     print(f"File has been saved at: {os.path.abspath(file_path)}")
     print("Done, the shooting stats have been scraped and saved.")
 
+    # Return DataFrame if requested
+    if return_df:
+        return dfshoot
 
-
-def possession_stats(export_format='csv'):
+def possession_stats(export_format='csv', return_df=False):
     import requests
     import pandas as pd
     from unidecode import unidecode
@@ -425,7 +426,7 @@ def possession_stats(export_format='csv'):
     # Drop Matches
     dfpossession.drop(columns='Matches', inplace=True)
 
-    # Define the file path
+    # Define the file path and export based on format
     if export_format == 'csv':
         file_path = 'fbrefBig5Possession.csv'
         dfpossession.to_csv(file_path, index=False)
@@ -440,9 +441,11 @@ def possession_stats(export_format='csv'):
     print(f"File has been saved at: {os.path.abspath(file_path)}")
     print("Done, the possession stats have been scraped and saved.")
 
+    # Return DataFrame if requested
+    if return_df:
+        return dfpossession
 
-
-def creation_stats(export_format='csv'):
+def creation_stats(export_format='csv', return_df=False):
     import requests
     import pandas as pd
     from unidecode import unidecode
@@ -547,7 +550,7 @@ def creation_stats(export_format='csv'):
     dfcreation['Player'] = dfcreation['Player'].apply(unidecode)
     dfcreation['Squad'] = dfcreation['Squad'].apply(unidecode)
 
-    # Define the file path
+    # Define the file path and export based on format
     if export_format == 'csv':
         file_path = 'fbrefBig5Creation.csv'
         dfcreation.to_csv(file_path, index=False)
@@ -562,9 +565,11 @@ def creation_stats(export_format='csv'):
     print(f"File has been saved at: {os.path.abspath(file_path)}")
     print("Done, the creation stats have been scraped and saved.")
 
+    # Return DataFrame if requested
+    if return_df:
+        return dfcreation
 
-
-def defense_stats(export_format='csv'):
+def defense_stats(export_format='csv', return_df=False):
     import requests
     import pandas as pd
     from unidecode import unidecode
@@ -654,7 +659,7 @@ def defense_stats(export_format='csv'):
     dfdefense['Player'] = dfdefense['Player'].apply(unidecode)
     dfdefense['Squad'] = dfdefense['Squad'].apply(unidecode)
 
-    # Define the file path
+    # Define the file path and export based on format
     if export_format == 'csv':
         file_path = 'fbrefBig5Defense.csv'
         dfdefense.to_csv(file_path, index=False)
@@ -669,11 +674,11 @@ def defense_stats(export_format='csv'):
     print(f"File has been saved at: {os.path.abspath(file_path)}")
     print("Done, the defense stats have been scraped and saved.")
 
+    # Return DataFrame if requested
+    if return_df:
+        return dfdefense
 
-
-
-
-def passing_stats(export_format='csv'):
+def passing_stats(export_format='csv', return_df=False):
     import requests
     import pandas as pd
     from unidecode import unidecode
@@ -751,7 +756,7 @@ def passing_stats(export_format='csv'):
     dfPassing['Player'] = dfPassing['Player'].apply(unidecode)
     dfPassing['Squad'] = dfPassing['Squad'].apply(unidecode)
 
-    # Define the file path
+    # Define the file path and export based on format
     if export_format == 'csv':
         file_path = 'fbrefBig5Passing.csv'
         dfPassing.to_csv(file_path, index=False)
@@ -766,9 +771,11 @@ def passing_stats(export_format='csv'):
     print(f"File has been saved at: {os.path.abspath(file_path)}")
     print("Done, the passing stats have been scraped and saved.")
 
+    # Return DataFrame if requested
+    if return_df:
+        return dfPassing
 
-
-def passing_type_stats(export_format='csv'):
+def passing_type_stats(export_format='csv', return_df=False):
     import requests
     import pandas as pd
     from unidecode import unidecode
@@ -835,9 +842,11 @@ def passing_type_stats(export_format='csv'):
     print(f"File has been saved at: {os.path.abspath(file_path)}")
     print("Done, the passing type stats have been scraped and saved.")
 
+    # Return DataFrame if requested
+    if return_df:
+        return dfpassingtypes
 
-
-def playing_time_stats(export_format='csv'):
+def playing_time_stats(export_format='csv', return_df=False):
     import requests
     import pandas as pd
     from unidecode import unidecode
@@ -905,3 +914,36 @@ def playing_time_stats(export_format='csv'):
     # Print confirmation
     print(f"File has been saved at: {os.path.abspath(file_path)}")
     print("Done, the playing time stats have been scraped and saved.")
+
+    # Return DataFrame if requested
+    if return_df:
+        return dfplayingtime
+
+def scrape_all_stats(export_format='csv'):
+    # Execute each scraping function
+    print("Starting to scrape shooting stats...")
+    shooting_stats(export_format)
+    
+    print("Starting to scrape defense stats...")
+    defense_stats(export_format)
+    
+    print("Starting to scrape passing stats...")
+    passing_stats(export_format)
+    
+    print("Starting to scrape passing type stats...")
+    passing_type_stats(export_format)
+    
+    print("Starting to scrape playing time stats...")
+    playing_time_stats(export_format)
+    
+    print("Starting to scrape standard stats...")
+    standard_stats(export_format)
+    
+    print("Starting to scrape possession stats...")
+    possession_stats(export_format)
+    
+    print("Starting to scrape creation stats...")
+    creation_stats(export_format)
+    
+    print("All stats have been scraped and saved.")
+
