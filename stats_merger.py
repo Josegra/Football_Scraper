@@ -809,26 +809,16 @@ def merger_5leagues(export_format='csv', return_df=False):
     import pandas as pd
     import numpy as np
     import os
-    df0 = pd.read_csv('fbrefBig5standard.csv', encoding='latin-1')
-    df1 = pd.read_csv('fbrefBig5Shoot.csv', encoding='latin-1')
-    df2 = pd.read_csv('fbrefBig5passing.csv', encoding='latin-1')
-    df3 = pd.read_csv('fbrefBig5PassingType.csv', encoding='latin-1')
-    df4 = pd.read_csv('fbrefBig5Creation.csv', encoding='latin-1')
-    df5 = pd.read_csv('fbrefBig5defense.csv', encoding='latin-1')
-    df6 = pd.read_csv('fbrefBig5Possession.csv', encoding='latin-1')
-    df7 = pd.read_csv('fbrefBig5PlayingTime.csv', encoding='latin-1')
-
-
     ## Renombrar los CSV
 
-    player_stand_stats = df0
-    player_shoot_stats = df1
-    player_pass_stats = df2
-    player_passtypes_stats = df3
-    player_ga_stats = df4
-    player_defense_stats = df5
-    player_possession_stats = df6
-    player_time_stats = df7
+    player_stand_stats = standard_stats(return_df=True)
+    player_shoot_stats = shooting_stats(return_df=True)
+    player_pass_stats = passing_stats(return_df=True)
+    player_passtypes_stats = passing_type_stats(return_df=True)
+    player_ga_stats = creation_stats(return_df=True)
+    player_defense_stats = defense_stats(return_df=True)
+    player_possession_stats = possession_stats(return_df=True)
+    player_time_stats = playing_time_stats(return_df=True)
 
     ## Union de Standart con Shooting
     merged_df = pd.merge(
