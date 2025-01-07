@@ -1,146 +1,3 @@
-def merger_5leagues(export_format='csv', return_df=False):
-    ## Leer los CSV 
-    import pandas as pd
-    import numpy as np
-    import os
-    df0 = pd.read_csv('fbrefBig5standard.csv', encoding='latin-1')
-    df1 = pd.read_csv('fbrefBig5Shoot.csv', encoding='latin-1')
-    df2 = pd.read_csv('fbrefBig5passing.csv', encoding='latin-1')
-    df3 = pd.read_csv('fbrefBig5PassingType.csv', encoding='latin-1')
-    df4 = pd.read_csv('fbrefBig5Creation.csv', encoding='latin-1')
-    df5 = pd.read_csv('fbrefBig5defense.csv', encoding='latin-1')
-    df6 = pd.read_csv('fbrefBig5Possession.csv', encoding='latin-1')
-    df7 = pd.read_csv('fbrefBig5PlayingTime.csv', encoding='latin-1')
-
-
-    ## Renombrar los CSV
-
-    player_stand_stats = df0
-    player_shoot_stats = df1
-    player_pass_stats = df2
-    player_passtypes_stats = df3
-    player_ga_stats = df4
-    player_defense_stats = df5
-    player_possession_stats = df6
-    player_time_stats = df7
-
-    ## Union de Standart con Shooting
-    merged_df = pd.merge(
-        player_stand_stats,
-        player_shoot_stats,
-        on='PlSqu',
-        how='inner',
-        suffixes=('_stand', '_shoot')  # Sufijos para diferenciar columnas
-    )
-
-    # Identificar columnas duplicadas y mantener las de `player_stand_stats`
-    columns_to_drop = [col for col in merged_df.columns if col.endswith('_shoot') and col[:-6] in player_stand_stats.columns]
-    merged_df = merged_df.drop(columns=columns_to_drop)
-
-    # Renombrar columnas para eliminar sufijos
-    merged_df.columns = [col.replace('_stand', '') for col in merged_df.columns]
-    
-    ## Agregando Pass types
-
-    final_merged_df = pd.merge(
-        merged_df,
-        player_pass_stats,
-        on='PlSqu',
-        how='inner',
-        suffixes=('', '_passing')
-    )
-
-    # Step 4: Clean up duplicates from the second merge
-    columns_to_drop = [col for col in final_merged_df.columns if col.endswith('_passing') and col[:-8] in merged_df.columns]
-    final_merged_df = final_merged_df.drop(columns=columns_to_drop)
-
-    ## Player GA Stats
-
-    final_merged_df = pd.merge(
-        final_merged_df,
-        player_ga_stats,
-        on='PlSqu',
-        how='inner',
-        suffixes=('', '_ga')
-    )
-    columns_to_drop = [
-        col for col in final_merged_df.columns
-        if col.endswith('_ga') and col[:-3] in final_merged_df.columns
-    ]
-    final_merged_df = final_merged_df.drop(columns=columns_to_drop)
-
-    ## Player defense 
-
-    # Merge `final_merged_df` with `player_defense_stats`
-    final_merged_df = pd.merge(
-        final_merged_df,
-        player_defense_stats,
-        on='PlSqu',
-        how='inner',
-        suffixes=('', '_defense')
-    )
-
-    # Clean up duplicates from the merge
-    columns_to_drop = [
-        col for col in final_merged_df.columns
-        if col.endswith('_defense') and col[:-8] in final_merged_df.columns
-    ]
-    final_merged_df = final_merged_df.drop(columns=columns_to_drop)
-
-    ## Possession stats 
-
-    # Merge `final_merged_df` with `player_possession_stats`
-    final_merged_df = pd.merge(
-        final_merged_df,
-        player_possession_stats,
-        on='PlSqu',
-        how='inner',
-        suffixes=('', '_possession')
-    )
-
-    # Clean up duplicates from the merge
-    columns_to_drop = [
-        col for col in final_merged_df.columns
-        if col.endswith('_possession') and col[:-11] in final_merged_df.columns
-    ]
-    final_merged_df = final_merged_df.drop(columns=columns_to_drop)
-
-    ## Players with stats 
-
-    final_merged_df = pd.merge(
-        final_merged_df,
-        player_time_stats,
-        on='PlSqu',
-        how='inner',
-        suffixes=('', '_time')
-    )
-
-    # Clean up duplicates from the merge
-    columns_to_drop = [
-        col for col in final_merged_df.columns
-        if col.endswith('_time') and col[:-5] in final_merged_df.columns
-    ]
-    final_merged_df = final_merged_df.drop(columns=columns_to_drop)
-
-    # Define the file path and export based on format
-    if export_format == 'csv':
-        file_path = 'final_fbref_all5_columns.csv'
-        final_merged_df.to_csv(file_path, index=False)
-    elif export_format == 'excel':
-        file_path = 'final_fbref_all5_columns.xlsx'
-        final_merged_df.to_excel(file_path, index=False)
-    else:
-        print("Invalid export format. Please choose 'csv' or 'excel'.")
-        return
-
-    # Print the file path and confirmation message
-    print(f"File has been saved at: {os.path.abspath(file_path)}")
-    print("Done, all 5 leagues have been merged.")
-
-    # Return DataFrame if requested
-    if return_df:
-        return final_merged_df
-
 def standard_stats(export_format='csv', return_df=False):
     import requests
     import pandas as pd
@@ -947,3 +804,145 @@ def scrape_all_stats(export_format='csv'):
     
     print("All stats have been scraped and saved.")
 
+def merger_5leagues(export_format='csv', return_df=False):
+    ## Leer los CSV 
+    import pandas as pd
+    import numpy as np
+    import os
+    df0 = pd.read_csv('fbrefBig5standard.csv', encoding='latin-1')
+    df1 = pd.read_csv('fbrefBig5Shoot.csv', encoding='latin-1')
+    df2 = pd.read_csv('fbrefBig5passing.csv', encoding='latin-1')
+    df3 = pd.read_csv('fbrefBig5PassingType.csv', encoding='latin-1')
+    df4 = pd.read_csv('fbrefBig5Creation.csv', encoding='latin-1')
+    df5 = pd.read_csv('fbrefBig5defense.csv', encoding='latin-1')
+    df6 = pd.read_csv('fbrefBig5Possession.csv', encoding='latin-1')
+    df7 = pd.read_csv('fbrefBig5PlayingTime.csv', encoding='latin-1')
+
+
+    ## Renombrar los CSV
+
+    player_stand_stats = df0
+    player_shoot_stats = df1
+    player_pass_stats = df2
+    player_passtypes_stats = df3
+    player_ga_stats = df4
+    player_defense_stats = df5
+    player_possession_stats = df6
+    player_time_stats = df7
+
+    ## Union de Standart con Shooting
+    merged_df = pd.merge(
+        player_stand_stats,
+        player_shoot_stats,
+        on='PlSqu',
+        how='inner',
+        suffixes=('_stand', '_shoot')  # Sufijos para diferenciar columnas
+    )
+
+    # Identificar columnas duplicadas y mantener las de `player_stand_stats`
+    columns_to_drop = [col for col in merged_df.columns if col.endswith('_shoot') and col[:-6] in player_stand_stats.columns]
+    merged_df = merged_df.drop(columns=columns_to_drop)
+
+    # Renombrar columnas para eliminar sufijos
+    merged_df.columns = [col.replace('_stand', '') for col in merged_df.columns]
+    
+    ## Agregando Pass types
+
+    final_merged_df = pd.merge(
+        merged_df,
+        player_pass_stats,
+        on='PlSqu',
+        how='inner',
+        suffixes=('', '_passing')
+    )
+
+    # Step 4: Clean up duplicates from the second merge
+    columns_to_drop = [col for col in final_merged_df.columns if col.endswith('_passing') and col[:-8] in merged_df.columns]
+    final_merged_df = final_merged_df.drop(columns=columns_to_drop)
+
+    ## Player GA Stats
+
+    final_merged_df = pd.merge(
+        final_merged_df,
+        player_ga_stats,
+        on='PlSqu',
+        how='inner',
+        suffixes=('', '_ga')
+    )
+    columns_to_drop = [
+        col for col in final_merged_df.columns
+        if col.endswith('_ga') and col[:-3] in final_merged_df.columns
+    ]
+    final_merged_df = final_merged_df.drop(columns=columns_to_drop)
+
+    ## Player defense 
+
+    # Merge `final_merged_df` with `player_defense_stats`
+    final_merged_df = pd.merge(
+        final_merged_df,
+        player_defense_stats,
+        on='PlSqu',
+        how='inner',
+        suffixes=('', '_defense')
+    )
+
+    # Clean up duplicates from the merge
+    columns_to_drop = [
+        col for col in final_merged_df.columns
+        if col.endswith('_defense') and col[:-8] in final_merged_df.columns
+    ]
+    final_merged_df = final_merged_df.drop(columns=columns_to_drop)
+
+    ## Possession stats 
+
+    # Merge `final_merged_df` with `player_possession_stats`
+    final_merged_df = pd.merge(
+        final_merged_df,
+        player_possession_stats,
+        on='PlSqu',
+        how='inner',
+        suffixes=('', '_possession')
+    )
+
+    # Clean up duplicates from the merge
+    columns_to_drop = [
+        col for col in final_merged_df.columns
+        if col.endswith('_possession') and col[:-11] in final_merged_df.columns
+    ]
+    final_merged_df = final_merged_df.drop(columns=columns_to_drop)
+
+    ## Players with stats 
+
+    final_merged_df = pd.merge(
+        final_merged_df,
+        player_time_stats,
+        on='PlSqu',
+        how='inner',
+        suffixes=('', '_time')
+    )
+
+    # Clean up duplicates from the merge
+    columns_to_drop = [
+        col for col in final_merged_df.columns
+        if col.endswith('_time') and col[:-5] in final_merged_df.columns
+    ]
+    final_merged_df = final_merged_df.drop(columns=columns_to_drop)
+
+    # Define the file path and export based on format
+    if export_format == 'csv':
+        file_path = 'final_fbref_all5_columns.csv'
+        final_merged_df.to_csv(file_path, index=False)
+    elif export_format == 'excel':
+        file_path = 'final_fbref_all5_columns.xlsx'
+        final_merged_df.to_excel(file_path, index=False)
+    else:
+        print("Invalid export format. Please choose 'csv' or 'excel'.")
+        return
+
+    # Print the file path and confirmation message
+    print(f"File has been saved at: {os.path.abspath(file_path)}")
+    print("Done, all 5 leagues have been merged.")
+
+    # Return DataFrame if requested
+    if return_df:
+        return final_merged_df
