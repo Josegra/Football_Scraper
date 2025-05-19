@@ -6,20 +6,18 @@ def standard_stats(export_format=None, return_df=False):
 
     # URL
     url = 'https://fbref.com/en/comps/Big5/stats/players/Big-5-European-Leagues-Stats'
-    html_content = requests.get(url).text.replace('<!--', '').replace('-->', '')
-    df = pd.read_html(html_content)
-
+    df = pd.read_html(url)[0]  # Lee la primera tabla de la página
     # Drop top header
-    df[1].columns = df[1].columns.droplevel(0)
+    df.columns = df.columns.droplevel(0)
 
     # Cleaning
-    dfdata = df[1]
-    dfstandard = dfdata.drop(dfdata[dfdata.Age == 'Age'].index)
+
+    dfstandard = df[df['Player'] != 'Player']
 
     # Convert string to float
-    numeric_cols = ['90s', 'Gls', 'Ast', 'G-PK', 'PK', 'PKatt', 'CrdY', 'CrdR',
-                    'G+A', 'G+A-PK', 'xG', 'npxG', 'npxG+xAG', 'xG+xAG']
-    dfstandard[numeric_cols] = dfstandard[numeric_cols].astype(float)
+    #numeric_cols = ['90s', 'Gls', 'Ast', 'G-PK', 'PK', 'PKatt', 'CrdY', 'CrdR',
+                    #'G+A', 'G+A-PK', 'xG', 'npxG', 'npxG+xAG', 'xG+xAG']
+    #dfstandard[numeric_cols] = dfstandard[numeric_cols].astype(float)
 
     # Handle duplicate column names
     def rename_duplicates(columns, target_col):
@@ -74,19 +72,11 @@ def shooting_stats(export_format=None, return_df=False):
 
     # URL
     url = 'https://fbref.com/en/comps/Big5/shooting/players/Big-5-European-Leagues-Stats'
-    html_content = requests.get(url).text.replace('<!--', '').replace('-->', '')
-    df = pd.read_html(html_content)
+    df = pd.read_html(url)[0]  # Lee la primera tabla de la página
     
     # Clean the age columns
-    df[1].columns = df[1].columns.droplevel(0)  # Drop top header row
-    dfdata = df[1]
-    dfshoot = dfdata.drop(dfdata[dfdata.Age == 'Age'].index)
-    
-    # Convert to strings and to float
-    numeric_cols = ['90s', 'Gls', 'Sh', 'SoT', 'SoT%', 'Sh/90', 'SoT/90', 'G/Sh', 
-                    'G/SoT', 'Dist', 'FK', 'PK', 'PKatt', 'xG', 'npxG', 
-                    'npxG/Sh', 'G-xG', 'np:G-xG']
-    dfshoot[numeric_cols] = dfshoot[numeric_cols].astype(float)
+    df.columns = df.columns.droplevel(0) # Drop top header row
+    dfshoot = df[df['Player'] != 'Player']
 
     # Drop Matches column
     dfshoot.drop(columns='Matches', inplace=True)
@@ -119,20 +109,12 @@ def possession_stats(export_format=None, return_df=False):
 
     # URL
     url = 'https://fbref.com/en/comps/Big5/possession/players/Big-5-European-Leagues-Stats'
-    html_content = requests.get(url).text.replace('<!--', '').replace('-->', '')
-    df = pd.read_html(html_content)
+    df = pd.read_html(url)[0]  # Lee la primera tabla de la página
 
     # Clean the top header row
-    df[1].columns = df[1].columns.droplevel(0)
-    dfdata = df[1]
-    dfpossession = dfdata.drop(dfdata[dfdata.Age == 'Age'].index)
+    df.columns = df.columns.droplevel(0)
 
-    # Convert to numeric
-    numeric_cols = ['90s', 'Touches', 'Def Pen', 'Def 3rd', 'Mid 3rd', 'Att 3rd', 'Att Pen', 'Live',
-                    'Succ', 'Att', 'Succ%', 'Carries', 'TotDist', 'PrgDist', '1/3', 'CPA', 'Mis',
-                    'Dis', 'Rec']
-    dfpossession[numeric_cols] = dfpossession[numeric_cols].astype(float)
-
+    dfpossession = df[df['Player'] != 'Player']
     # Rename duplicate columns for "Prog"
     cols = []
     count = 1
@@ -175,17 +157,11 @@ def creation_stats(export_format=None, return_df=False):
 
     # URL
     url = 'https://fbref.com/en/comps/Big5/gca/players/Big-5-European-Leagues-Stats'
-    html_content = requests.get(url).text.replace('<!--', '').replace('-->', '')
-    df = pd.read_html(html_content)
+    df = pd.read_html(url)[0]  # Lee la primera tabla de la página
 
     # Clean the top header row
-    df[1].columns = df[1].columns.droplevel(0)
-    dfdata = df[1]
-    dfcreation = dfdata.drop(dfdata[dfdata.Age == 'Age'].index)
-
-    # Convert numeric columns to float
-    numeric_cols = ['90s', 'SCA', 'PassLive', 'PassDead', 'Sh', 'Fld', 'Def', 'GCA']
-    dfcreation[numeric_cols] = dfcreation[numeric_cols].astype(float)
+    df.columns = df.columns.droplevel(0)
+    dfcreation = df[df['Player'] != 'Player']
 
     # Rename duplicate columns
     def rename_duplicates(columns, target_col, suffix):
@@ -240,18 +216,11 @@ def defense_stats(export_format=None, return_df=False):
 
     # URL
     url = 'https://fbref.com/en/comps/Big5/defense/players/Big-5-European-Leagues-Stats'
-    html_content = requests.get(url).text.replace('<!--', '').replace('-->', '')
-    df = pd.read_html(html_content)
+    df = pd.read_html(url)[0]  # Lee la primera tabla de la página
 
     # Clean the top header row
-    df[1].columns = df[1].columns.droplevel(0)
-    dfdata = df[1]
-    dfdefense = dfdata.drop(dfdata[dfdata.Age == 'Age'].index)
-
-    # Convert numeric columns to float
-    numeric_cols = ['90s', 'Tkl', 'TklW', 'Def 3rd', 'Mid 3rd', 'Att 3rd', 'Att', 
-                    'Tkl%', 'Blocks', 'Sh', 'Pass', 'Int', 'Tkl+Int', 'Clr', 'Err']
-    dfdefense[numeric_cols] = dfdefense[numeric_cols].astype(float)
+    df.columns = df.columns.droplevel(0)
+    dfdefense = df[df['Player'] != 'Player']
 
     # Rename duplicate columns
     def rename_duplicates(columns, target_col, suffix):
@@ -306,18 +275,11 @@ def passing_stats(export_format=None, return_df=False):
 
     # URL
     url = 'https://fbref.com/en/comps/Big5/passing/players/Big-5-European-Leagues-Stats'
-    html_content = requests.get(url).text.replace('<!--', '').replace('-->', '')
-    df = pd.read_html(html_content)
+    df = pd.read_html(url)[0]  # Lee la primera tabla de la página
 
     # Clean the top header row
-    df[1].columns = df[1].columns.droplevel(0)
-    dfdata = df[1]
-    dfPassing = dfdata.drop(dfdata[dfdata.Age == 'Age'].index)
-
-    # Convert numeric columns to float
-    numeric_cols = ['90s', 'Cmp', 'Att', 'Cmp%', 'TotDist', 'PrgDist', 'Ast', 'xA',
-                    'KP', '1/3', 'PPA', 'CrsPA']
-    dfPassing[numeric_cols] = dfPassing[numeric_cols].astype(float)
+    df.columns = df.columns.droplevel(0)
+    dfPassing = df[df['Player'] != 'Player']
 
     # Rename duplicate columns
     def rename_duplicates(columns, target_col, suffix):
@@ -374,18 +336,11 @@ def passing_type_stats(export_format=None, return_df=False):
 
     # URL
     url = 'https://fbref.com/en/comps/Big5/passing_types/players/Big-5-European-Leagues-Stats'
-    html_content = requests.get(url).text.replace('<!--', '').replace('-->', '')
-    df = pd.read_html(html_content)
+    df = pd.read_html(url)[0]  # Lee la primera tabla de la página
 
     # Clean the top header row
-    df[1].columns = df[1].columns.droplevel(0)
-    dfdata = df[1]
-    dfpassingtypes = dfdata.drop(dfdata[dfdata.Age == 'Age'].index)
-
-    # Convert numeric columns to float
-    numeric_cols = ['90s', 'Att', 'Live', 'Dead', 'FK', 'TB', 'Sw', 'Crs', 'CK',
-                    'In', 'Out', 'Str', 'TI', 'Cmp', 'Off', 'Blocks']
-    dfpassingtypes[numeric_cols] = dfpassingtypes[numeric_cols].astype(float)
+    df.columns = df.columns.droplevel(0)
+    dfpassingtypes = df[df['Player'] != 'Player']
 
     # Rename duplicate columns
     def rename_duplicates(columns, target_col, suffix):
@@ -433,20 +388,11 @@ def playing_time_stats(export_format=None, return_df=False):
 
     # URL
     url = 'https://fbref.com/en/comps/Big5/playingtime/players/Big-5-European-Leagues-Stats'
-    html_content = requests.get(url).text.replace('<!--', '').replace('-->', '')
-    df = pd.read_html(html_content, encoding='utf-8')
+    df = pd.read_html(url)[0] 
 
     # Clean the top header row and fill NaN values with 0
-    df[0].columns = df[0].columns.droplevel(0)
-    df[0] = df[0].fillna(0)
-    dfdata = df[0]
-    dfplayingtime = dfdata.drop(dfdata[dfdata.Age == 'Age'].index)
-
-    # Convert numeric columns to float
-    numeric_cols = ['90s', 'Starts', 'Mn/Start', 'Compl', 'Subs', 'Mn/Sub', 'unSub',
-                    'PPM', 'onG', 'onGA', '+/-', '+/-90', 'On-Off', 'onxG', 'onxGA',
-                    'xG+/-', 'xG+/-90']
-    dfplayingtime[numeric_cols] = dfplayingtime[numeric_cols].astype(float)
+    df.columns = df.columns.droplevel(0)
+    dfplayingtime = df[df['Player'] != 'Player']
 
     # Rename duplicate columns
     def rename_duplicates(columns, target_col, suffix):
