@@ -495,6 +495,7 @@ def scrape_all_stats(export_format=None, return_dfs=False):
 def merger_5leagues(export_format=None, return_df=False):
     import pandas as pd
     import os
+    import unicodedata
 
     # Leer DataFrames usando las funciones de scraping
     player_stand_stats = standard_stats(return_df=True)
@@ -575,6 +576,174 @@ def merger_5leagues(export_format=None, return_df=False):
     columns_to_drop = [col for col in final_merged_df.columns if col.endswith('_time') and col[:-5] in final_merged_df.columns]
     final_merged_df = final_merged_df.drop(columns=columns_to_drop)
 
+    # --- Limpieza final aplicada al final_merged_df ---
+
+    # Diccionario de países
+    nation_mapping = {
+        'eng': 'England',
+        'es': 'Spain',
+        'ie': 'Ireland',
+        'fr': 'France',
+        'ma': 'Morocco',
+        'dz': 'Algeria',
+        'eg': 'Egypt',
+        'tn': 'Tunisia',
+        'sa': 'Saudi Arabia',
+        'dk': 'Denmark',
+        'br': 'Brazil',
+        'it': 'Italy',
+        'ng': 'Nigeria',
+        'sct': 'Scotland',
+        'us': 'USA',
+        'at': 'Austria',
+        'de': 'Germany',
+        'ci': 'Ivory Coast',
+        'me': 'Montenegro',
+        'ch': 'Switzerland',
+        'se': 'Sweden',
+        'gh': 'Ghana',
+        'no': 'Norway',
+        'ro': 'Romania',
+        'nl': 'Netherlands',
+        'ar': 'Argentina',
+        'py': 'Paraguay',
+        'ga': 'Gabon',
+        'pt': 'Portugal',
+        'mx': 'Mexico',
+        'sn': 'Senegal',
+        'pa': 'Panama',
+        'pr': 'Puerto Rico',
+        'jm': 'Jamaica',
+        'uy': 'Uruguay',
+        've': 'Venezuela',
+        'ht': 'Haiti',
+        'is': 'Iceland',
+        'jp': 'Japan',
+        'al': 'Albania',
+        'co': 'Colombia',
+        'tg': 'Togo',
+        'id': 'Indonesia',
+        'gn': 'Guinea',
+        'hr': 'Croatia',
+        'sl': 'Sierra Leone',
+        'ca': 'Canada',
+        'cd': 'Congo (DR)',
+        'cm': 'Cameroon',
+        'hu': 'Hungary',
+        'zm': 'Zambia',
+        'cz': 'Czech Republic',
+        'be': 'Belgium',
+        'tr': 'Turkey',
+        'sr': 'Suriname',
+        'pl': 'Poland',
+        'sk': 'Slovakia',
+        'gw': 'Guinea-Bissau',
+        'si': 'Slovenia',
+        'ml': 'Mali',
+        'nir': 'Northern Ireland',
+        'rs': 'Serbia',
+        'cl': 'Chile',
+        'wls': 'Wales',
+        'au': 'Australia',
+        'nz': 'New Zealand',
+        'ec': 'Ecuador',
+        'lu': 'Luxembourg',
+        'gm': 'Gambia',
+        'cg': 'Congo',
+        'bd': 'Bangladesh',
+        'gq': 'Equatorial Guinea',
+        'cv': 'Cape Verde',
+        'ge': 'Georgia',
+        'mq': 'Martinique',
+        'ba': 'Bosnia and Herzegovina',
+        'mk': 'North Macedonia',
+        'bf': 'Burkina Faso',
+        'gr': 'Greece',
+        'ua': 'Ukraine',
+        'cr': 'Costa Rica',
+        'lt': 'Lithuania',
+        'ru': 'Russia',
+        'do': 'Dominican Republic',
+        'iq': 'Iraq',
+        'kr': 'South Korea',
+        'ph': 'Philippines',
+        'bj': 'Benin',
+        'fi': 'Finland',
+        'ee': 'Estonia',
+        'zw': 'Zimbabwe',
+        'il': 'Israel',
+        'cy': 'Cyprus',
+        'uz': 'Uzbekistan',
+        'ao': 'Angola',
+        'cf': 'Central African Republic',
+        'gp': 'Guadeloupe',
+        'mg': 'Madagascar',
+        'pe': 'Peru',
+        'gf': 'French Guiana',
+        'mz': 'Mozambique',
+        'am': 'Armenia',
+        'xk': 'Kosovo',
+        'ly': 'Libya',
+        'bi': 'Burundi',
+        'ke': 'Kenya',
+        'km': 'Comoros',
+        'md': 'Moldova',
+        'ms': 'Montserrat',
+        'jo': 'Jordan',
+        'ir': 'Iran',
+        'mt': 'Malta'
+    }
+
+    # Limpiar columna Nation (extraer código y mapear)
+    final_merged_df['Nation'] = final_merged_df['Nation'].str.extract(r'^(\w+)')
+    final_merged_df['Nation'] = final_merged_df['Nation'].map(nation_mapping)
+
+    # Extraer nombre de competición (quitar código inicial)
+    final_merged_df['Comp'] = final_merged_df['Comp'].str.extract(r'^\w+\s+(.*)')
+
+    # Convertir edad a decimal
+    def edad_a_decimal(edad_str):
+        import pandas as pd
+        if pd.isnull(edad_str):
+            return None
+        try:
+            años, dias = map(int, edad_str.split('-'))
+            return round(años + dias / 365, 2)
+        except:
+            return None
+
+    final_merged_df['DecimalAge'] = final_merged_df['Age'].apply(edad_a_decimal)
+
+    # Cargar df maestro de posiciones y jugadores
+    df_maestro = pd.read_csv("https://raw.githubusercontent.com/Josegra/Football_Scraper/main/players.csv")
+
+    # Función para normalizar nombres (eliminar acentos y convertir a minúsculas)
+    def normalizar_nombre(nombre):
+        if pd.isnull(nombre):
+            return ""
+        nombre = unicodedata.normalize('NFKD', nombre).encode('ASCII', 'ignore').decode('utf-8')
+        return nombre.lower().strip()
+
+    # Normalizar nombres en ambos DataFrames
+    final_merged_df['Player_norm'] = final_merged_df['Player'].apply(normalizar_nombre)
+    df_maestro['name_norm'] = df_maestro['name'].apply(normalizar_nombre)
+
+    # Eliminar duplicados en df_maestro para evitar múltiples coincidencias por jugador
+    df_maestro_unico = df_maestro[['name_norm', 'sub_position']].drop_duplicates(subset='name_norm')
+
+    # Merge para agregar posición secundaria
+    final_merged_df = final_merged_df.merge(
+        df_maestro_unico,
+        how='left',
+        left_on='Player_norm',
+        right_on='name_norm'
+    )
+
+    # Eliminar columnas auxiliares si no se necesitan
+    final_merged_df.drop(columns=['name_norm', 'Player_norm'], inplace=True)
+
+    # --- Fin limpieza final ---
+
     # Exportar o devolver el DataFrame
     if export_format == 'csv':
         file_path = 'final_fbref_all5_columns.csv'
@@ -588,4 +757,3 @@ def merger_5leagues(export_format=None, return_df=False):
         return final_merged_df
     else:
         print("Por favor, especifica un formato de exportación ('csv' o 'excel') o selecciona return_df=True para obtener un DataFrame.")
-
