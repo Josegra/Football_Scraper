@@ -3,11 +3,29 @@ import requests
 import pandas as pd
 from unidecode import unidecode
 import os
+import time # <--- AÑADIDO PARA LA PAUSA
 
 # --- Helper Function ---
 def _get_season_string(start_year=None):
     if start_year is None:
-        year_to_use = datetime.now().year - 1
+        # Para la temporada 2024-2025, si estamos en 2025, start_year debería ser 2024.
+        # datetime.now().year - 1 es correcto si la temporada ya terminó.
+        # Si la temporada está en curso y queremos esa temporada, podría ser datetime.now().year
+        # pero FBRef estructura sus URLs con el año de inicio de la temporada.
+        # Por ejemplo, la temporada 2024-2025 tiene start_year=2024.
+        current_year = datetime.now().year
+        current_month = datetime.now().month
+
+        # Si estamos después de julio (inicio típico de nueva temporada de fichajes/preparación)
+        # y el usuario no especifica, podríamos asumir que quiere la temporada que acaba de terminar.
+        # Si estamos a principios/mediados de año, datetime.now().year - 1 es la temporada anterior completa.
+        # FBRef usualmente completa los datos de una temporada (ej. 2023-2024) unos meses después de que termine (Mayo/Junio 2024).
+        # Para la temporada 2024-2025, el año a usar es 2024.
+        # Si ahora es Mayo 2025, la temporada 2024-2025 es la que acaba de terminar.
+        # Así, year_to_use = 2024. (datetime.now().year - 1)
+        default_year = current_year -1 # Asume que queremos la temporada más reciente completada o casi completada
+        year_to_use = default_year
+
     else:
         try:
             year_to_use = int(start_year)
@@ -19,32 +37,20 @@ def _get_season_string(start_year=None):
 # --- Stat Scraping Functions (Simplified Comments) ---
 def _fetch_and_clean_fbref_table(url):
     try:
-        # Asegurarse de que requests usa https
         if not url.startswith("https://"):
             print(f"Advertencia: La URL {url} no usa HTTPS. Intentando con HTTPS.")
             if url.startswith("http://"):
                 url = url.replace("http://", "https://", 1)
-            else: # Asumir que es un dominio sin protocolo
-                 print(f"Advertencia: URL {url} sin protocolo, se asume https.")
-                 # Esto es un intento, podría fallar si el formato es inesperado.
-                 # Para FBRef, generalmente es seguro asumir que el dominio es correcto y solo falta https.
-                 # Pero si la url fuera 'fbref.com/foo' sin 'en/comps/...' podría ser problemático.
-                 # Dado el contexto de las URLs usadas, esto debería ser seguro.
-
-        # Utilizar un User-Agent para simular un navegador
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        response = requests.get(url, headers=headers, timeout=15) # timeout de 15 segundos
-        response.raise_for_status() # Levanta un error para códigos 4xx/5xx
-
-        # Leer directamente el contenido de la respuesta
+        response = requests.get(url, headers=headers, timeout=30) # Aumentado timeout a 30s por si acaso
+        response.raise_for_status()
         dfs = pd.read_html(response.content)
         if not dfs:
             print(f"No se encontraron tablas en {url}")
             return pd.DataFrame()
-        df = dfs[0] # Asumir que la primera tabla es la deseada
-
+        df = dfs[0]
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(0)
         df = df[df['Player'] != 'Player'].copy()
@@ -57,10 +63,18 @@ def _fetch_and_clean_fbref_table(url):
         else:
             df.loc[:, 'PlSqu'] = pd.Series(dtype='str')
         return df
+    except requests.exceptions.HTTPError as http_err:
+        print(f"Error HTTP al leer datos de {url}: {http_err}")
+        if http_err.response.status_code == 403:
+            print("Esto es un error 403 Forbidden. El servidor está bloqueando la solicitud.")
+            print("Intenta aumentar el tiempo de espera entre solicitudes o revisar tu User-Agent/IP.")
+        elif http_err.response.status_code == 404:
+            print(f"Error 404: Página no encontrada en {url}. Verifica la URL y la temporada.")
+        return pd.DataFrame()
     except requests.exceptions.RequestException as e:
         print(f"Error de red o HTTP al leer datos de {url}: {e}")
         return pd.DataFrame()
-    except ValueError as ve: # pd.read_html puede lanzar ValueError si no hay tablas
+    except ValueError as ve:
         print(f"Error al parsear HTML (posiblemente no hay tablas) de {url}: {ve}")
         return pd.DataFrame()
     except Exception as e:
@@ -91,8 +105,8 @@ def standard_stats(start_year=None, export_format=None, return_df=False):
             if col == target_col: new_columns.append(f"{target_col}_{count}"); count +=1
             else: new_columns.append(col)
         return new_columns
-    for col in ['Gls', 'Ast', 'G-PK', 'PK', 'PKatt', 'CrdY', 'CrdR','xG', 'npxG', 'xA', 'npxG+xA', 'G+A', 'xAG', 'npxG+xAG']: #Añadidas más columnas que podrían estar duplicadas
-        if col in df.columns: # Verificar si la columna existe antes de intentar renombrar
+    for col in ['Gls', 'Ast', 'G-PK', 'PK', 'PKatt', 'CrdY', 'CrdR','xG', 'npxG', 'xA', 'npxG+xA', 'G+A', 'xAG', 'npxG+xAG']:
+        if col in df.columns:
              df.columns = rename_duplicates_std(df.columns, col)
     df.columns = [c.replace('_1','').replace('_2','_p90') if '_1' in c or '_2' in c else (c+'_p90' if c in ['G+A-PK','xG+xAG'] else c) for c in df.columns]
 
@@ -131,7 +145,7 @@ def creation_stats(start_year=None, export_format=None, return_df=False):
         return new_columns
     temp_cols = list(df.columns)
     for col_target in ['PassLive', 'PassDead', 'Drib', 'Sh', 'Fld', 'Def']:
-        if col_target in df.columns: # Verificar si la columna existe
+        if col_target in df.columns:
             temp_cols = ren_dups_creation(temp_cols, col_target)
     df.columns = [c.replace('_1','_SCA').replace('_2','_GCA') if '_1' in c or '_2' in c else c for c in temp_cols]
     if export_format and not return_df: _export_df(df, 'fbrefBig5Creation', season, export_format)
@@ -150,7 +164,7 @@ def defense_stats(start_year=None, export_format=None, return_df=False):
         return new_columns
     current_cols = list(df.columns)
     for col_target in ['Def 3rd', 'Mid 3rd', 'Att 3rd', 'Tkl']:
-        if col_target in df.columns: # Verificar si la columna existe
+        if col_target in df.columns:
             current_cols = ren_dups_defense(current_cols, col_target)
     df.columns = ['Tkl_tackles' if c == 'Tkl_1' else ('Tkl_challenges' if c == 'Tkl_2' else c) for c in current_cols]
     if export_format and not return_df: _export_df(df, 'fbrefBig5Defense', season, export_format)
@@ -169,7 +183,7 @@ def passing_stats(start_year=None, export_format=None, return_df=False):
         return new_columns
     current_cols = list(df.columns)
     for col_target in ['Cmp', 'Att', 'Cmp%']:
-        if col_target in df.columns: # Verificar si la columna existe
+        if col_target in df.columns:
             current_cols = ren_dups_pass(current_cols, col_target)
     df.columns = [c.replace('_1','').replace('_2','_short').replace('_3','_medium').replace('_4','_long') if any(s in c for s in ['_1','_2','_3','_4']) else c for c in current_cols]
     if export_format and not return_df: _export_df(df, 'fbrefBig5Passing', season, export_format)
@@ -186,7 +200,7 @@ def passing_type_stats(start_year=None, export_format=None, return_df=False):
             if col == target_col: new_columns.append(f"{target_col}_{count}"); count += 1
             else: new_columns.append(col)
         return new_columns
-    if 'Out' in df.columns: # Verificar si la columna existe
+    if 'Out' in df.columns:
         df.columns = ren_dups_passtypes(list(df.columns), 'Out')
     if export_format and not return_df: _export_df(df, 'fbrefBig5PassingType', season, export_format)
     return df if return_df else None
@@ -202,7 +216,7 @@ def playing_time_stats(start_year=None, export_format=None, return_df=False):
             if col == target_col: new_columns.append(f"{target_col}_{count}"); count += 1
             else: new_columns.append(col)
         return new_columns
-    if 'On-Off' in df.columns: # Verificar si la columna existe
+    if 'On-Off' in df.columns:
         df.columns = ren_dups_playtime(list(df.columns), 'On-Off')
     if export_format and not return_df: _export_df(df, 'fbrefBig5PlayingTime', season, export_format)
     return df if return_df else None
@@ -217,12 +231,16 @@ def scrape_all_stats_for_merge(start_year=None):
         creation_stats, defense_stats, possession_stats, playing_time_stats
     ]
     dfs_list = []
-    for func in stat_funcs_ordered:
+    for i, func in enumerate(stat_funcs_ordered): # Añadido enumerate para el primer sleep
+        if i > 0: # No dormir antes de la primera solicitud de la serie
+            print(f"Esperando 20 segundos antes de la siguiente solicitud para evitar ser bloqueado...")
+            time.sleep(20) # <--- PAUSA DE 20 SEGUNDOS AÑADIDA AQUÍ
+
         print(f"Obteniendo datos de: {func.__name__}...")
         df = func(start_year=start_year, return_df=True)
         if df is not None and not df.empty:
             dfs_list.append(df)
-            print(f"Datos de {func.__name__} obtenidos exitosamente. Columnas: {list(df.columns[:5])}...") # Muestra primeras 5 cols
+            print(f"Datos de {func.__name__} obtenidos exitosamente. {df.shape[0]} filas y {df.shape[1]} columnas.")
         else:
             print(f"Advertencia: {func.__name__} devolvió un DataFrame vacío o None para {season_str}.")
     return dfs_list
@@ -239,15 +257,16 @@ def merger_5leagues(start_year=None, export_format=None, return_df=False):
         if return_df: return pd.DataFrame()
         return None
 
-    # Iniciar con el primer DataFrame no vacío
     final_merged_df = pd.DataFrame()
     initial_df_found = False
-    for i, df in enumerate(all_dfs):
-        if not df.empty:
-            final_merged_df = df.copy()
+    temp_all_dfs = list(all_dfs) # Copiar para poder modificarla
+
+    for i, df_iter in enumerate(all_dfs):
+        if not df_iter.empty:
+            final_merged_df = df_iter.copy()
             initial_df_found = True
-            all_dfs = all_dfs[i+1:] # Resto de DFs para mergear
-            print(f"DataFrame inicial para merge: {type(all_dfs[0] if all_dfs else None).__name__ if all_dfs else 'N/A'} (basado en el primer DF no vacío)")
+            temp_all_dfs = all_dfs[i+1:]
+            print(f"DataFrame inicial para merge tomado de la función de scraping número {i+1}. Forma: {final_merged_df.shape}")
             break
     
     if not initial_df_found:
@@ -255,36 +274,24 @@ def merger_5leagues(start_year=None, export_format=None, return_df=False):
         if return_df: return pd.DataFrame()
         return None
 
-
-    for df_to_add in all_dfs:
+    for df_to_add in temp_all_dfs: # Usar la lista modificada
         if df_to_add.empty:
-            # print(f"Omitiendo un DataFrame vacío en la lista de merge.") # Menos verboso
             continue
         if 'PlSqu' in df_to_add.columns and 'PlSqu' in final_merged_df.columns:
             cols_to_drop_from_new_df = [c for c in df_to_add.columns if c in final_merged_df.columns and c != 'PlSqu']
-            # Asegurar que no se dropea 'PlSqu' si es la única columna común
             if 'PlSqu' in cols_to_drop_from_new_df : cols_to_drop_from_new_df.remove('PlSqu')
-
             df_cleaned = df_to_add.drop(columns=cols_to_drop_from_new_df, errors='ignore')
-
             if not df_cleaned.empty:
-                # print(f"Mergeando con DataFrame que tiene columnas: {list(df_cleaned.columns[:5])}...") # Debug
-                # Antes del merge, verificar si 'PlSqu' está vacío o tiene NaNs y cuántos
-                # if df_cleaned['PlSqu'].isnull().any(): print(f"Advertencia: 'PlSqu' en df_cleaned tiene {df_cleaned['PlSqu'].isnull().sum()} NaNs antes del merge.")
-                # if final_merged_df['PlSqu'].isnull().any(): print(f"Advertencia: 'PlSqu' en final_merged_df tiene {final_merged_df['PlSqu'].isnull().sum()} NaNs antes del merge.")
-                
                 final_merged_df = pd.merge(final_merged_df, df_cleaned, on='PlSqu', how='inner')
-                # print(f"Tamaño después del merge: {final_merged_df.shape}") # Debug
             else:
-                print(f"Advertencia: Un DataFrame intermedio quedó vacío después de limpiar columnas duplicadas (excepto PlSqu) y fue omitido.")
+                print(f"Advertencia: Un DataFrame intermedio quedó vacío después de limpiar columnas duplicadas y fue omitido.")
         else:
-            print(f"Advertencia: Un DataFrame intermedio no contiene 'PlSqu' (o el principal no lo tiene) y fue omitido del merge.")
+            print(f"Advertencia: Un DataFrame intermedio no contiene 'PlSqu' y fue omitido del merge.")
 
     if final_merged_df.empty:
         print(f"El DataFrame fusionado (antes de maestro) está vacío para {season_str}.")
     else:
         print(f"DataFrame fusionado (antes de maestro) tiene {final_merged_df.shape[0]} filas y {final_merged_df.shape[1]} columnas.")
-        # --- Limpieza de Datos Post-Merge (Naciones, Comp, Edad) ---
         nation_mapping = {
             'eng': 'England', 'es': 'Spain', 'ie': 'Ireland', 'fr': 'France', 'ma': 'Morocco',
             'dz': 'Algeria', 'eg': 'Egypt', 'tn': 'Tunisia', 'sa': 'Saudi Arabia', 'dk': 'Denmark',
@@ -334,7 +341,6 @@ def merger_5leagues(start_year=None, export_format=None, return_df=False):
             final_merged_df['DecimalAge'] = final_merged_df['Age'].apply(edad_a_decimal)
         else: print("Advertencia: Columna 'Age' no encontrada para DecimalAge.")
 
-        # --- Merge con DataFrame Maestro (players.csv) ---
         print("Intentando merge con players.csv...")
         try:
             def generar_player_code_para_fbref(nombre_fbref):
@@ -352,47 +358,54 @@ def merger_5leagues(start_year=None, export_format=None, return_df=False):
             df_maestro_raw = pd.read_csv("https://raw.githubusercontent.com/Josegra/Football_Scraper/main/players.csv")
             df_maestro = df_maestro_raw.copy()
             
-            # ASUNCIÓN: Generar 'player_code' en df_maestro si no existe o para asegurar consistencia
-            if 'name' in df_maestro.columns: # Asumiendo que 'name' es la columna de nombres en players.csv
-                 df_maestro['player_code'] = df_maestro['name'].apply(generar_player_code_para_fbref)
-            elif 'player_code' not in df_maestro.columns:
+            if 'name' in df_maestro.columns:
+                 df_maestro['player_code_maestro'] = df_maestro['name'].apply(generar_player_code_para_fbref) # Usar un nombre diferente para evitar conflicto inmediato
+            elif 'player_code' not in df_maestro.columns: # Si no tiene 'name' ni 'player_code'
                 print("Error crítico: 'players.csv' no tiene columna 'name' para generar 'player_code', ni 'player_code' preexistente.")
-                # No continuar con este merge si no hay clave
-            
-            if 'player_code' in df_maestro.columns and 'player_code' in final_merged_df.columns:
+            else: # Si tiene 'player_code' pero no 'name', lo renombramos para consistencia interna
+                df_maestro.rename(columns={'player_code': 'player_code_maestro'}, inplace=True)
+
+
+            if 'player_code_maestro' in df_maestro.columns and 'player_code' in final_merged_df.columns:
                 columnas_maestro_seleccionadas = [
-                    'player_code', 'sub_position', 'current_club_name',
+                    'player_code_maestro', 'sub_position', 'current_club_name',
                     'market_value_in_eur', 'last_season',
                     'foot', 'height_in_cm', 'contract_expiration_date'
                 ]
                 columnas_maestro_existentes = [col for col in columnas_maestro_seleccionadas if col in df_maestro.columns]
                 
-                if 'player_code' not in columnas_maestro_existentes: # Doble check por si player_code fue droppeado o no seleccionado
-                    print("Error Crítico: 'player_code' no está en las columnas seleccionadas del maestro para el cruce.")
+                if 'player_code_maestro' not in columnas_maestro_existentes:
+                    print("Error Crítico: 'player_code_maestro' no está en las columnas seleccionadas del maestro para el cruce.")
                 else:
-                    df_maestro_filtrado = df_maestro[columnas_maestro_existentes].drop_duplicates(subset='player_code', keep='first')
+                    df_maestro_filtrado = df_maestro[columnas_maestro_existentes].drop_duplicates(subset='player_code_maestro', keep='first')
                     
-                    # Antes de mergear, verificar valores únicos y duplicados en 'player_code'
-                    # print(f"Debug: player_code unique in final_merged_df: {final_merged_df['player_code'].nunique()} / {len(final_merged_df)}")
-                    # print(f"Debug: player_code unique in df_maestro_filtrado: {df_maestro_filtrado['player_code'].nunique()} / {len(df_maestro_filtrado)}")
-
                     final_merged_df = final_merged_df.merge(
                         df_maestro_filtrado,
-                        on='player_code',
+                        left_on='player_code',
+                        right_on='player_code_maestro', # Usar la columna renombrada/generada del maestro
                         how='left',
-                        suffixes=('', '_maestro')
+                        suffixes=('', '_duplicate_from_maestro') # Sufijo más específico
                     )
-                    cols_a_consolidar = list(set(columnas_maestro_existentes) - {'player_code'})
-                    for col_base in cols_a_consolidar:
-                        if col_base + '_maestro' in final_merged_df.columns:
-                            # Priorizar la información del maestro si existe, sino mantener la original (si la hubiera con el mismo nombre)
-                            final_merged_df[col_base] = final_merged_df[col_base + '_maestro'].fillna(final_merged_df.get(col_base))
-                            final_merged_df.drop(columns=[col_base + '_maestro'], inplace=True, errors='ignore')
-                        # Si la columna base original no existía y ahora sí (traída del maestro), está bien.
-                        # Si existía y no hubo colisión (no se creó _maestro), también está bien.
+                    # Eliminar la clave de merge duplicada del maestro si se añadió
+                    if 'player_code_maestro' in final_merged_df.columns:
+                         final_merged_df.drop(columns=['player_code_maestro'], inplace=True)
+
+                    # Consolidar columnas si hubo sufijos _duplicate_from_maestro
+                    cols_originales_del_maestro = list(set(columnas_maestro_existentes) - {'player_code_maestro'}) # Columnas que queríamos traer
+                    for col_base in cols_originales_del_maestro:
+                        col_con_sufijo = col_base + '_duplicate_from_maestro'
+                        if col_con_sufijo in final_merged_df.columns:
+                            # Si la columna original (ej. 'foot') ya existía en final_merged_df y también vino del maestro (como 'foot_duplicate_from_maestro')
+                            # Esta lógica prioriza el valor del maestro. Si el valor del maestro es NaN, se queda con el valor original de final_merged_df.
+                            final_merged_df[col_base] = final_merged_df[col_con_sufijo].combine_first(final_merged_df.get(col_base))
+                            final_merged_df.drop(columns=[col_con_sufijo], inplace=True)
+                        # Si la col_base no existía en final_merged_df antes, y ahora sí (porque vino del maestro sin sufijo,
+                        # lo cual pd.merge hace si no hay colisión), entonces ya está bien.
+                        # Si la col_base existía y no hubo colisión de nombres (el maestro no la tenía o tenía otro nombre), también está bien.
+
                     print("Cruce con archivo maestro realizado correctamente.")
             else:
-                 print("Error: 'player_code' no está disponible en ambos DataFrames para el cruce con el maestro.")
+                 print("Error: Clave de jugador ('player_code' o 'player_code_maestro') no está disponible en ambos DataFrames para el cruce con el maestro.")
 
         except FileNotFoundError:
             print("Error: players.csv no encontrado en la URL especificada.")
@@ -401,36 +414,26 @@ def merger_5leagues(start_year=None, export_format=None, return_df=False):
         except Exception as e:
             print(f"Error inesperado durante el merge con el maestro: {e}")
 
-    # --- INICIO: Conversión a formato numérico adecuado ---
     if not final_merged_df.empty:
         print("Convirtiendo columnas a formato numérico adecuado...")
         exclude_cols = [
             'Player', 'Nation', 'Pos', 'Squad', 'Comp', 'Born', 'foot',
             'contract_expiration_date', 'player_code', 'sub_position', 'current_club_name',
-            'PlSqu',  # Clave de string usada para merges internos
-            'Age'     # Columna original de edad tipo string "YY-DDD", DecimalAge es la numérica
+            'PlSqu', 'Age'
         ]
-
         for col in final_merged_df.columns:
             if col not in exclude_cols:
-                # Comprobar si la columna es de tipo objeto o string antes de convertir
-                # para evitar intentar convertir columnas ya numéricas innecesariamente
-                # o columnas de fecha/hora que podrían necesitar un manejo diferente (aunque pd.to_numeric las pasaría a NaN con coerce)
                 if final_merged_df[col].dtype == 'object' or pd.api.types.is_string_dtype(final_merged_df[col]):
                     final_merged_df[col] = pd.to_numeric(final_merged_df[col], errors='coerce')
                 elif pd.api.types.is_datetime64_any_dtype(final_merged_df[col]):
-                    # Si tienes columnas de fecha/hora que no están en exclude_cols y no quieres convertirlas a NaN:
-                    # print(f"Columna {col} es de tipo fecha/hora y no está en exclude_cols. Se omitirá la conversión a numérico.")
-                    pass # O maneja específicamente
+                    pass
         print("Conversión a numérico completada.")
-    elif export_format or return_df: # Solo imprimir si se esperaba una acción
+    elif export_format or return_df:
         print("DataFrame final vacío, no se realiza conversión numérica.")
-    # --- FIN: Conversión a formato numérico adecuado ---
 
-    # Exportar o devolver
     if not final_merged_df.empty:
-        _export_df(final_merged_df, 'final_fbref_all5_merged_data', season_str, export_format) # Nombre de archivo actualizado
-    elif export_format: # Solo imprimir si se esperaba exportar y está vacío
+        _export_df(final_merged_df, 'final_fbref_all5_merged_data', season_str, export_format)
+    elif export_format:
         print(f"DataFrame final vacío. No se guarda {export_format} para 'final_fbref_all5_merged_data'.")
 
     return final_merged_df if return_df else None
