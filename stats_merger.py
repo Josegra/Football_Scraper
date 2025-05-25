@@ -1,734 +1,290 @@
-from datetime import datetime # Import needed for the helper function
+from datetime import datetime
+import requests
+import pandas as pd
+from unidecode import unidecode
+import os
 
+# --- Helper Function ---
 def _get_season_string(start_year=None):
-    """
-    Determina la cadena de la temporada basada en el start_year.
-    Ejemplo: Para start_year=2022, devuelve "2022-2023".
-    Si start_year es None, por defecto usa la temporada que comenzó el año calendario anterior.
-    """
     if start_year is None:
         year_to_use = datetime.now().year - 1
     else:
         try:
             year_to_use = int(start_year)
         except ValueError:
-            #Fallback al año anterior si start_year no es un entero válido
-            print(f"Advertencia: start_year ('{start_year}') no es válido. Usando {datetime.now().year - 1} por defecto.")
+            print(f"Advertencia: start_year ('{start_year}') no válido. Usando {datetime.now().year - 1}.")
             year_to_use = datetime.now().year - 1
     return f"{year_to_use}-{year_to_use + 1}"
 
-def standard_stats(start_year=None, export_format=None, return_df=False):
-    import requests
-    import pandas as pd
-    from unidecode import unidecode
-    import os
+# --- Stat Scraping Functions (Simplified Comments) ---
+def _fetch_and_clean_fbref_table(url):
+    try:
+        # Asegurarse de que requests usa https
+        if not url.startswith("https://"):
+            print(f"Advertencia: La URL {url} no usa HTTPS. Intentando con HTTPS.")
+            if url.startswith("http://"):
+                url = url.replace("http://", "https://", 1)
+            else: # Asumir que es un dominio sin protocolo
+                 print(f"Advertencia: URL {url} sin protocolo, se asume https.")
+                 # Esto es un intento, podría fallar si el formato es inesperado.
+                 # Para FBRef, generalmente es seguro asumir que el dominio es correcto y solo falta https.
+                 # Pero si la url fuera 'fbref.com/foo' sin 'en/comps/...' podría ser problemático.
+                 # Dado el contexto de las URLs usadas, esto debería ser seguro.
 
+        # Utilizar un User-Agent para simular un navegador
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=15) # timeout de 15 segundos
+        response.raise_for_status() # Levanta un error para códigos 4xx/5xx
+
+        # Leer directamente el contenido de la respuesta
+        dfs = pd.read_html(response.content)
+        if not dfs:
+            print(f"No se encontraron tablas en {url}")
+            return pd.DataFrame()
+        df = dfs[0] # Asumir que la primera tabla es la deseada
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.droplevel(0)
+        df = df[df['Player'] != 'Player'].copy()
+        if 'Matches' in df.columns:
+            df.drop(columns='Matches', inplace=True)
+        df.loc[:, 'Player'] = df['Player'].apply(lambda x: unidecode(str(x)) if pd.notnull(x) else x)
+        df.loc[:, 'Squad'] = df['Squad'].apply(lambda x: unidecode(str(x)) if pd.notnull(x) else x)
+        if 'Player' in df.columns and 'Squad' in df.columns:
+            df.loc[:, 'PlSqu'] = df['Player'].astype(str) + df['Squad'].astype(str)
+        else:
+            df.loc[:, 'PlSqu'] = pd.Series(dtype='str')
+        return df
+    except requests.exceptions.RequestException as e:
+        print(f"Error de red o HTTP al leer datos de {url}: {e}")
+        return pd.DataFrame()
+    except ValueError as ve: # pd.read_html puede lanzar ValueError si no hay tablas
+        print(f"Error al parsear HTML (posiblemente no hay tablas) de {url}: {ve}")
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"Error general al leer o limpiar datos de {url}: {e}")
+        return pd.DataFrame()
+
+def _export_df(df, base_name, season, export_format):
+    if df.empty:
+        return
+    if export_format == 'csv':
+        path = f'{base_name}_{season}.csv'
+        df.to_csv(path, encoding='utf-8', index=False)
+        print(f"Archivo CSV guardado en: {os.path.abspath(path)}")
+    elif export_format == 'excel':
+        path = f'{base_name}_{season}.xlsx'
+        df.to_excel(path, index=False)
+        print(f"Archivo Excel guardado en: {os.path.abspath(path)}")
+
+def standard_stats(start_year=None, export_format=None, return_df=False):
     season = _get_season_string(start_year)
     url = f'https://fbref.com/en/comps/Big5/{season}/stats/players/{season}-Big-5-European-Leagues-Stats'
+    df = _fetch_and_clean_fbref_table(url)
+    if df.empty: return pd.DataFrame() if return_df else None
 
-    try:
-        df = pd.read_html(url)[0]  # Lee la primera tabla de la página
-    except Exception as e:
-        print(f"Error al leer datos de {url}: {e}")
-        if return_df:
-            return pd.DataFrame() # Devuelve DataFrame vacío en caso de error
-        else:
-            return
-
-    # Drop top header
-    df.columns = df.columns.droplevel(0)
-
-    # Cleaning
-    dfstandard = df[df['Player'] != 'Player'].copy() # Usar .copy() para evitar SettingWithCopyWarning
-
-    # Handle duplicate column names
-    def rename_duplicates(columns, target_col):
-        count = 1
-        new_columns = []
+    def rename_duplicates_std(columns, target_col):
+        count = 1; new_columns = []
         for col in columns:
-            if col == target_col:
-                new_columns.append(f"{target_col}_{count}")
-                count += 1
-            else:
-                new_columns.append(col)
+            if col == target_col: new_columns.append(f"{target_col}_{count}"); count +=1
+            else: new_columns.append(col)
         return new_columns
+    for col in ['Gls', 'Ast', 'G-PK', 'PK', 'PKatt', 'CrdY', 'CrdR','xG', 'npxG', 'xA', 'npxG+xA', 'G+A', 'xAG', 'npxG+xAG']: #Añadidas más columnas que podrían estar duplicadas
+        if col in df.columns: # Verificar si la columna existe antes de intentar renombrar
+             df.columns = rename_duplicates_std(df.columns, col)
+    df.columns = [c.replace('_1','').replace('_2','_p90') if '_1' in c or '_2' in c else (c+'_p90' if c in ['G+A-PK','xG+xAG'] else c) for c in df.columns]
 
-    for col in ['Gls', 'Ast', 'G-PK', 'xG', 'npxG', 'xA', 'npxG+xA', 'G+A', 'xAG', 'npxG+xAG']:
-        dfstandard.columns = rename_duplicates(dfstandard.columns, col)
-
-    # Clean additional columns
-    dfstandard.loc[:, 'PlSqu'] = dfstandard['Player'] + dfstandard['Squad']
-    dfstandard.loc[:, 'Player'] = dfstandard['Player'].apply(unidecode)
-    dfstandard.loc[:, 'Squad'] = dfstandard['Squad'].apply(unidecode)
-    if 'Matches' in dfstandard.columns:
-        dfstandard.drop(columns='Matches', inplace=True)
-
-    # Renaming columns
-    dfstandard.columns = [
-        col.replace('_1', '') if '_1' in col else
-        col.replace('_2', '_p90') if '_2' in col else
-        col + '_p90' if col in ['G+A-PK', 'xG+xAG'] else
-        col
-        for col in dfstandard.columns
-    ]
-
-    # Decide si exportar o devolver el DataFrame
-    if export_format == 'csv':
-        file_path = f'fbrefBig5standard_{season}.csv' # Nombre de archivo con temporada
-        dfstandard.to_csv(file_path, encoding='utf-8', index=False)
-        print(f"Archivo CSV guardado en: {os.path.abspath(file_path)}")
-    elif export_format == 'excel':
-        file_path = f'fbrefBig5standard_{season}.xlsx' # Nombre de archivo con temporada
-        dfstandard.to_excel(file_path, index=False)
-        print(f"Archivo Excel guardado en: {os.path.abspath(file_path)}")
-    elif return_df:
-        return dfstandard
-    else:
-        print("Por favor, especifica un formato de exportación ('csv' o 'excel') o selecciona return_df=True para obtener un DataFrame.")
-
+    if export_format and not return_df : _export_df(df, 'fbrefBig5standard', season, export_format)
+    return df if return_df else None
 
 def shooting_stats(start_year=None, export_format=None, return_df=False):
-    import requests
-    import pandas as pd
-    from unidecode import unidecode
-    import os
-
     season = _get_season_string(start_year)
     url = f'https://fbref.com/en/comps/Big5/{season}/shooting/players/{season}-Big-5-European-Leagues-Stats'
-
-    try:
-        df = pd.read_html(url)[0]
-    except Exception as e:
-        print(f"Error al leer datos de {url}: {e}")
-        if return_df:
-            return pd.DataFrame()
-        else:
-            return
-
-    df.columns = df.columns.droplevel(0)
-    dfshoot = df[df['Player'] != 'Player'].copy()
-
-    if 'Matches' in dfshoot.columns:
-        dfshoot.drop(columns='Matches', inplace=True)
-
-    dfshoot.loc[:, 'PlSqu'] = dfshoot['Player'] + dfshoot['Squad']
-    dfshoot.loc[:, 'Player'] = dfshoot['Player'].apply(unidecode)
-    dfshoot.loc[:, 'Squad'] = dfshoot['Squad'].apply(unidecode)
-
-    if export_format == 'csv':
-        file_path = f'fbrefBig5Shoot_{season}.csv'
-        dfshoot.to_csv(file_path, index=False)
-        print(f"Archivo CSV guardado en: {os.path.abspath(file_path)}")
-    elif export_format == 'excel':
-        file_path = f'fbrefBig5Shoot_{season}.xlsx'
-        dfshoot.to_excel(file_path, index=False)
-        print(f"Archivo Excel guardado en: {os.path.abspath(file_path)}")
-    elif return_df:
-        return dfshoot
-    else:
-        print("Por favor, especifica un formato de exportación ('csv' o 'excel') o selecciona return_df=True para obtener un DataFrame.")
-
+    df = _fetch_and_clean_fbref_table(url)
+    if df.empty: return pd.DataFrame() if return_df else None
+    if export_format and not return_df: _export_df(df, 'fbrefBig5Shoot', season, export_format)
+    return df if return_df else None
 
 def possession_stats(start_year=None, export_format=None, return_df=False):
-    import requests
-    import pandas as pd
-    from unidecode import unidecode
-    import os
-
     season = _get_season_string(start_year)
     url = f'https://fbref.com/en/comps/Big5/{season}/possession/players/{season}-Big-5-European-Leagues-Stats'
-
-    try:
-        df = pd.read_html(url)[0]
-    except Exception as e:
-        print(f"Error al leer datos de {url}: {e}")
-        if return_df:
-            return pd.DataFrame()
-        else:
-            return
-
-    df.columns = df.columns.droplevel(0)
-    dfpossession = df[df['Player'] != 'Player'].copy()
-
-    cols = []
-    count = 1
-    for column in dfpossession.columns:
-        if column == 'Prog':
-            cols.append(f'Prog_{count}')
-            count += 1
-        else:
-            cols.append(column)
-    dfpossession.columns = cols
-
-    dfpossession.loc[:, 'PlSqu'] = dfpossession['Player'] + dfpossession['Squad']
-    dfpossession.loc[:, 'Player'] = dfpossession['Player'].apply(unidecode)
-    dfpossession.loc[:, 'Squad'] = dfpossession['Squad'].apply(unidecode)
-
-    if 'Matches' in dfpossession.columns:
-        dfpossession.drop(columns='Matches', inplace=True)
-
-    if export_format == 'csv':
-        file_path = f'fbrefBig5Possession_{season}.csv'
-        dfpossession.to_csv(file_path, index=False)
-        print(f"Archivo CSV guardado en: {os.path.abspath(file_path)}")
-    elif export_format == 'excel':
-        file_path = f'fbrefBig5Possession_{season}.xlsx'
-        dfpossession.to_excel(file_path, index=False)
-        print(f"Archivo Excel guardado en: {os.path.abspath(file_path)}")
-    elif return_df:
-        return dfpossession
-    else:
-        print("Por favor, especifica un formato de exportación ('csv' o 'excel') o selecciona return_df=True para obtener un DataFrame.")
-
+    df = _fetch_and_clean_fbref_table(url)
+    if df.empty: return pd.DataFrame() if return_df else None
+    cols, count = [], 1
+    for column in df.columns: cols.append(f'Prog_{count}' if column == 'Prog' and (count:=count+1)-1 else column)
+    df.columns = cols
+    if export_format and not return_df: _export_df(df, 'fbrefBig5Possession', season, export_format)
+    return df if return_df else None
 
 def creation_stats(start_year=None, export_format=None, return_df=False):
-    import requests
-    import pandas as pd
-    from unidecode import unidecode
-    import os
-
     season = _get_season_string(start_year)
     url = f'https://fbref.com/en/comps/Big5/{season}/gca/players/{season}-Big-5-European-Leagues-Stats'
-
-    try:
-        df = pd.read_html(url)[0]
-    except Exception as e:
-        print(f"Error al leer datos de {url}: {e}")
-        if return_df:
-            return pd.DataFrame()
-        else:
-            return
-
-    df.columns = df.columns.droplevel(0)
-    dfcreation = df[df['Player'] != 'Player'].copy()
-
-    def rename_duplicates(columns, target_col, suffix):
-        count = 1
-        new_columns = []
+    df = _fetch_and_clean_fbref_table(url)
+    if df.empty: return pd.DataFrame() if return_df else None
+    def ren_dups_creation(columns, target_col):
+        count = 1; new_columns = []
         for col in columns:
-            if col == target_col:
-                new_columns.append(f"{target_col}_{suffix}{count}")
-                count += 1
-            else:
-                new_columns.append(col)
+            if col == target_col: new_columns.append(f"{target_col}_{count}"); count += 1
+            else: new_columns.append(col)
         return new_columns
-
-    for col, suffix in [('PassLive', ''), ('PassDead', ''), ('Drib', ''), ('Sh', ''), ('Fld', ''), ('Def', '')]:
-        dfcreation.columns = rename_duplicates(dfcreation.columns, col, suffix)
-
-    dfcreation.columns = [
-        col.replace('_1', '_SCA') if '_1' in col else
-        col.replace('_2', '_GCA') if '_2' in col else
-        col
-        for col in dfcreation.columns
-    ]
-
-    if 'Matches' in dfcreation.columns:
-        dfcreation.drop(columns='Matches', inplace=True)
-    dfcreation.loc[:, 'PlSqu'] = dfcreation['Player'] + dfcreation['Squad']
-    dfcreation.loc[:, 'Player'] = dfcreation['Player'].apply(unidecode)
-    dfcreation.loc[:, 'Squad'] = dfcreation['Squad'].apply(unidecode)
-
-    if export_format == 'csv':
-        file_path = f'fbrefBig5Creation_{season}.csv'
-        dfcreation.to_csv(file_path, index=False)
-        print(f"Archivo CSV guardado en: {os.path.abspath(file_path)}")
-    elif export_format == 'excel':
-        file_path = f'fbrefBig5Creation_{season}.xlsx'
-        dfcreation.to_excel(file_path, index=False)
-        print(f"Archivo Excel guardado en: {os.path.abspath(file_path)}")
-    elif return_df:
-        return dfcreation
-    else:
-        print("Por favor, especifica un formato de exportación ('csv' o 'excel') o selecciona return_df=True para obtener un DataFrame.")
-
+    temp_cols = list(df.columns)
+    for col_target in ['PassLive', 'PassDead', 'Drib', 'Sh', 'Fld', 'Def']:
+        if col_target in df.columns: # Verificar si la columna existe
+            temp_cols = ren_dups_creation(temp_cols, col_target)
+    df.columns = [c.replace('_1','_SCA').replace('_2','_GCA') if '_1' in c or '_2' in c else c for c in temp_cols]
+    if export_format and not return_df: _export_df(df, 'fbrefBig5Creation', season, export_format)
+    return df if return_df else None
 
 def defense_stats(start_year=None, export_format=None, return_df=False):
-    import requests
-    import pandas as pd
-    from unidecode import unidecode
-    import os
-
     season = _get_season_string(start_year)
     url = f'https://fbref.com/en/comps/Big5/{season}/defense/players/{season}-Big-5-European-Leagues-Stats'
-
-    try:
-        df = pd.read_html(url)[0]
-    except Exception as e:
-        print(f"Error al leer datos de {url}: {e}")
-        if return_df:
-            return pd.DataFrame()
-        else:
-            return
-
-    df.columns = df.columns.droplevel(0)
-    dfdefense = df[df['Player'] != 'Player'].copy()
-
-    def rename_duplicates(columns, target_col, suffix):
-        count = 1
-        new_columns = []
+    df = _fetch_and_clean_fbref_table(url)
+    if df.empty: return pd.DataFrame() if return_df else None
+    def ren_dups_defense(columns, target_col):
+        count = 1; new_columns = []
         for col in columns:
-            if col == target_col:
-                new_columns.append(f"{target_col}_{suffix}{count}")
-                count += 1
-            else:
-                new_columns.append(col)
+            if col == target_col: new_columns.append(f"{target_col}_{count}"); count += 1
+            else: new_columns.append(col)
         return new_columns
-
-    for col, suffix in [('Def 3rd', ''), ('Mid 3rd', ''), ('Att 3rd', ''), ('Tkl', '')]: #Verificar si Tkl realmente necesita esto o si es manejado por el siguiente bloque
-        dfdefense.columns = rename_duplicates(dfdefense.columns, col, suffix)
-
-    # Ajustar nombres de columnas para Tackle y Challenge
-    # Esta lógica parece más específica, asegurar que no entre en conflicto con el bucle anterior
-    new_cols_defense = []
-    tkl_count = 1
-    for col_name in dfdefense.columns:
-        if col_name == 'Tkl': # Asumiendo que este 'Tkl' es el que se quiere renombrar a Tkl_tackles
-            new_cols_defense.append(f'Tkl_tackles') # El original lo renombraba a Tkl_1 -> Tkl_tackles
-            tkl_count += 1
-        elif col_name == 'Tkl_2': # Asumiendo que este sería el renombrado por rename_duplicates si hubiera un segundo 'Tkl' original
-             new_cols_defense.append('Tkl_challenges')
-        else:
-            new_cols_defense.append(col_name)
-    dfdefense.columns = new_cols_defense
-    # Re-evaluar la lógica original de renombrado de Tkl:
-    # dfdefense.columns = [
-    # col.replace('_1', '_tackles') if '_1' in col else # Originalmente col == 'Tkl_1'
-    # col.replace('_2', '_challenges') if '_2' in col else # Originalmente col == 'Tkl_2'
-    # col
-    # for col in dfdefense.columns
-    # ]
-    # Esto sugiere que después de rename_duplicates, podrías tener 'Tkl_1', 'Tkl_2' etc.
-    # Vamos a seguir el patrón original de forma más directa:
-    final_cols = []
-    temp_cols = list(dfdefense.columns) # Trabajar sobre una copia temporal de las columnas
-
-    # Primero, el renombrado genérico de duplicados
-    for target_col_rename in ['Def 3rd', 'Mid 3rd', 'Att 3rd', 'Tkl']:
-         temp_cols = rename_duplicates(temp_cols, target_col_rename, "") # El suffix original era vacío
-
-    # Luego, el renombrado específico para Tkl si aparecen como Tkl_1, Tkl_2
-    processed_cols = []
-    for col in temp_cols:
-        if col == "Tkl_1": # Asumiendo que 'Tkl_1' viene de rename_duplicates
-            processed_cols.append("Tkl_tackles")
-        elif col == "Tkl_2": # Asumiendo que 'Tkl_2' viene de rename_duplicates
-            processed_cols.append("Tkl_challenges")
-        else:
-            processed_cols.append(col)
-    dfdefense.columns = processed_cols
-
-
-    if 'Matches' in dfdefense.columns:
-        dfdefense.drop(columns='Matches', inplace=True)
-    dfdefense.loc[:, 'PlSqu'] = dfdefense['Player'] + dfdefense['Squad']
-    dfdefense.loc[:, 'Player'] = dfdefense['Player'].apply(unidecode)
-    dfdefense.loc[:, 'Squad'] = dfdefense['Squad'].apply(unidecode)
-
-    if export_format == 'csv':
-        file_path = f'fbrefBig5Defense_{season}.csv'
-        dfdefense.to_csv(file_path, index=False)
-        print(f"Archivo CSV guardado en: {os.path.abspath(file_path)}")
-    elif export_format == 'excel':
-        file_path = f'fbrefBig5Defense_{season}.xlsx'
-        dfdefense.to_excel(file_path, index=False)
-        print(f"Archivo Excel guardado en: {os.path.abspath(file_path)}")
-    elif return_df:
-        return dfdefense
-    else:
-        print("Por favor, especifica un formato de exportación ('csv' o 'excel') o selecciona return_df=True para obtener un DataFrame.")
-
+    current_cols = list(df.columns)
+    for col_target in ['Def 3rd', 'Mid 3rd', 'Att 3rd', 'Tkl']:
+        if col_target in df.columns: # Verificar si la columna existe
+            current_cols = ren_dups_defense(current_cols, col_target)
+    df.columns = ['Tkl_tackles' if c == 'Tkl_1' else ('Tkl_challenges' if c == 'Tkl_2' else c) for c in current_cols]
+    if export_format and not return_df: _export_df(df, 'fbrefBig5Defense', season, export_format)
+    return df if return_df else None
 
 def passing_stats(start_year=None, export_format=None, return_df=False):
-    import requests
-    import pandas as pd
-    from unidecode import unidecode
-    import os
-
     season = _get_season_string(start_year)
     url = f'https://fbref.com/en/comps/Big5/{season}/passing/players/{season}-Big-5-European-Leagues-Stats'
-
-    try:
-        df = pd.read_html(url)[0]
-    except Exception as e:
-        print(f"Error al leer datos de {url}: {e}")
-        if return_df:
-            return pd.DataFrame()
-        else:
-            return
-
-    df.columns = df.columns.droplevel(0)
-    dfPassing = df[df['Player'] != 'Player'].copy()
-
-    def rename_duplicates(columns, target_col, suffix=""): # Suffix por defecto vacío como en el original
-        count = 1
-        new_columns = []
+    df = _fetch_and_clean_fbref_table(url)
+    if df.empty: return pd.DataFrame() if return_df else None
+    def ren_dups_pass(columns, target_col):
+        count = 1; new_columns = []
         for col in columns:
-            if col == target_col:
-                new_columns.append(f"{target_col}_{suffix}{count}")
-                count += 1
-            else:
-                new_columns.append(col)
+            if col == target_col: new_columns.append(f"{target_col}_{count}"); count += 1
+            else: new_columns.append(col)
         return new_columns
-
-    current_columns = list(dfPassing.columns)
-    for col_target in ['Cmp', 'Att', 'Cmp%']: # Columnas que se renombraban con sufijos numéricos
-        current_columns = rename_duplicates(current_columns, col_target) # Usar el suffix por defecto que añade _1, _2 etc.
-    dfPassing.columns = current_columns
-
-    dfPassing.columns = [
-        col.replace('_1', '') if '_1' in col else  # Para Cmp_1 -> Cmp, Att_1 -> Att, Cmp%_1 -> Cmp%
-        col.replace('_2', '_short') if '_2' in col else
-        col.replace('_3', '_medium') if '_3' in col else
-        col.replace('_4', '_long') if '_4' in col else
-        col
-        for col in dfPassing.columns
-    ]
-
-    if 'Matches' in dfPassing.columns:
-        dfPassing.drop(columns='Matches', inplace=True)
-    dfPassing.loc[:, 'PlSqu'] = dfPassing['Player'] + dfPassing['Squad']
-    dfPassing.loc[:, 'Player'] = dfPassing['Player'].apply(unidecode)
-    dfPassing.loc[:, 'Squad'] = dfPassing['Squad'].apply(unidecode)
-
-    if export_format == 'csv':
-        file_path = f'fbrefBig5Passing_{season}.csv'
-        dfPassing.to_csv(file_path, index=False)
-        print(f"Archivo CSV guardado en: {os.path.abspath(file_path)}")
-    elif export_format == 'excel':
-        file_path = f'fbrefBig5Passing_{season}.xlsx'
-        dfPassing.to_excel(file_path, index=False)
-        print(f"Archivo Excel guardado en: {os.path.abspath(file_path)}")
-    elif return_df:
-        return dfPassing
-    else:
-        print("Por favor, especifica un formato de exportación ('csv' o 'excel') o selecciona return_df=True para obtener un DataFrame.")
-
+    current_cols = list(df.columns)
+    for col_target in ['Cmp', 'Att', 'Cmp%']:
+        if col_target in df.columns: # Verificar si la columna existe
+            current_cols = ren_dups_pass(current_cols, col_target)
+    df.columns = [c.replace('_1','').replace('_2','_short').replace('_3','_medium').replace('_4','_long') if any(s in c for s in ['_1','_2','_3','_4']) else c for c in current_cols]
+    if export_format and not return_df: _export_df(df, 'fbrefBig5Passing', season, export_format)
+    return df if return_df else None
 
 def passing_type_stats(start_year=None, export_format=None, return_df=False):
-    import requests
-    import pandas as pd
-    from unidecode import unidecode
-    import os
-
     season = _get_season_string(start_year)
     url = f'https://fbref.com/en/comps/Big5/{season}/passing_types/players/{season}-Big-5-European-Leagues-Stats'
-
-    try:
-        df = pd.read_html(url)[0]
-    except Exception as e:
-        print(f"Error al leer datos de {url}: {e}")
-        if return_df:
-            return pd.DataFrame()
-        else:
-            return
-
-    df.columns = df.columns.droplevel(0)
-    dfpassingtypes = df[df['Player'] != 'Player'].copy()
-
-    def rename_duplicates(columns, target_col, suffix=""): # Suffix por defecto vacío como en el original
-        count = 1
-        new_columns = []
+    df = _fetch_and_clean_fbref_table(url)
+    if df.empty: return pd.DataFrame() if return_df else None
+    def ren_dups_passtypes(columns, target_col):
+        count = 1; new_columns = []
         for col in columns:
-            if col == target_col:
-                new_columns.append(f"{target_col}_{suffix}{count}")
-                count += 1
-            else:
-                new_columns.append(col)
+            if col == target_col: new_columns.append(f"{target_col}_{count}"); count += 1
+            else: new_columns.append(col)
         return new_columns
-
-    dfpassingtypes.columns = rename_duplicates(dfpassingtypes.columns, 'Out', '') # El original usaba '' como suffix
-
-    if 'Matches' in dfpassingtypes.columns:
-        dfpassingtypes.drop(columns='Matches', inplace=True)
-
-    dfpassingtypes.loc[:, 'PlSqu'] = dfpassingtypes['Player'] + dfpassingtypes['Squad']
-    dfpassingtypes.loc[:, 'Player'] = dfpassingtypes['Player'].apply(unidecode)
-    dfpassingtypes.loc[:, 'Squad'] = dfpassingtypes['Squad'].apply(unidecode)
-
-    if export_format == 'csv':
-        file_path = f'fbrefBig5PassingType_{season}.csv'
-        dfpassingtypes.to_csv(file_path, index=False)
-        print(f"Archivo CSV guardado en: {os.path.abspath(file_path)}")
-    elif export_format == 'excel':
-        file_path = f'fbrefBig5PassingType_{season}.xlsx'
-        dfpassingtypes.to_excel(file_path, index=False)
-        print(f"Archivo Excel guardado en: {os.path.abspath(file_path)}")
-    elif return_df:
-        return dfpassingtypes
-    else:
-        print("Por favor, especifica un formato de exportación ('csv' o 'excel') o selecciona return_df=True para obtener un DataFrame.")
-
+    if 'Out' in df.columns: # Verificar si la columna existe
+        df.columns = ren_dups_passtypes(list(df.columns), 'Out')
+    if export_format and not return_df: _export_df(df, 'fbrefBig5PassingType', season, export_format)
+    return df if return_df else None
 
 def playing_time_stats(start_year=None, export_format=None, return_df=False):
-    import requests
-    import pandas as pd
-    from unidecode import unidecode
-    import os
-
     season = _get_season_string(start_year)
     url = f'https://fbref.com/en/comps/Big5/{season}/playingtime/players/{season}-Big-5-European-Leagues-Stats'
-
-    try:
-        df = pd.read_html(url)[0]
-    except Exception as e:
-        print(f"Error al leer datos de {url}: {e}")
-        if return_df:
-            return pd.DataFrame()
-        else:
-            return
-
-    df.columns = df.columns.droplevel(0)
-    dfplayingtime = df[df['Player'] != 'Player'].copy()
-
-    def rename_duplicates(columns, target_col, suffix=""): # Suffix por defecto vacío como en el original
-        count = 1
-        new_columns = []
+    df = _fetch_and_clean_fbref_table(url)
+    if df.empty: return pd.DataFrame() if return_df else None
+    def ren_dups_playtime(columns, target_col):
+        count = 1; new_columns = []
         for col in columns:
-            if col == target_col:
-                new_columns.append(f"{target_col}_{suffix}{count}")
-                count += 1
-            else:
-                new_columns.append(col)
+            if col == target_col: new_columns.append(f"{target_col}_{count}"); count += 1
+            else: new_columns.append(col)
         return new_columns
+    if 'On-Off' in df.columns: # Verificar si la columna existe
+        df.columns = ren_dups_playtime(list(df.columns), 'On-Off')
+    if export_format and not return_df: _export_df(df, 'fbrefBig5PlayingTime', season, export_format)
+    return df if return_df else None
 
-    dfplayingtime.columns = rename_duplicates(dfplayingtime.columns, 'On-Off', '') # El original usaba '' como suffix
+# --- Function to Scrape All Stats ---
+def scrape_all_stats_for_merge(start_year=None):
+    season_str = _get_season_string(start_year)
+    print(f"Iniciando scraping para la temporada: {season_str} (para merge)")
 
-    if 'Matches' in dfplayingtime.columns:
-        dfplayingtime.drop(columns='Matches', inplace=True)
+    stat_funcs_ordered = [
+        standard_stats, shooting_stats, passing_stats, passing_type_stats,
+        creation_stats, defense_stats, possession_stats, playing_time_stats
+    ]
+    dfs_list = []
+    for func in stat_funcs_ordered:
+        print(f"Obteniendo datos de: {func.__name__}...")
+        df = func(start_year=start_year, return_df=True)
+        if df is not None and not df.empty:
+            dfs_list.append(df)
+            print(f"Datos de {func.__name__} obtenidos exitosamente. Columnas: {list(df.columns[:5])}...") # Muestra primeras 5 cols
+        else:
+            print(f"Advertencia: {func.__name__} devolvió un DataFrame vacío o None para {season_str}.")
+    return dfs_list
 
-    dfplayingtime.loc[:, 'PlSqu'] = dfplayingtime['Player'] + dfplayingtime['Squad']
-    dfplayingtime.loc[:, 'Player'] = dfplayingtime['Player'].apply(unidecode)
-    dfplayingtime.loc[:, 'Squad'] = dfplayingtime['Squad'].apply(unidecode)
-
-    if export_format == 'csv':
-        file_path = f'fbrefBig5PlayingTime_{season}.csv'
-        dfplayingtime.to_csv(file_path, index=False)
-        print(f"Archivo CSV guardado en: {os.path.abspath(file_path)}")
-    elif export_format == 'excel':
-        file_path = f'fbrefBig5PlayingTime_{season}.xlsx'
-        dfplayingtime.to_excel(file_path, index=False)
-        print(f"Archivo Excel guardado en: {os.path.abspath(file_path)}")
-    elif return_df:
-        return dfplayingtime
-    else:
-        print("Por favor, especifica un formato de exportación ('csv' o 'excel') o selecciona return_df=True para obtener un DataFrame.")
-
-
-def scrape_all_stats(start_year=None, export_format=None, return_dfs=False):
-    dfs = []
-    season_str = _get_season_string(start_year) # Para mensajes y nombres de archivo si es necesario
-    print(f"Iniciando scraping para la temporada: {season_str}")
-
-    print("Starting to scrape shooting stats...")
-    if return_dfs:
-        dfs.append(shooting_stats(start_year=start_year, return_df=True))
-    else:
-        shooting_stats(start_year=start_year, export_format=export_format)
-
-    print("Starting to scrape defense stats...")
-    if return_dfs:
-        dfs.append(defense_stats(start_year=start_year, return_df=True))
-    else:
-        defense_stats(start_year=start_year, export_format=export_format)
-
-    print("Starting to scrape passing stats...")
-    if return_dfs:
-        dfs.append(passing_stats(start_year=start_year, return_df=True))
-    else:
-        passing_stats(start_year=start_year, export_format=export_format)
-
-    print("Starting to scrape passing type stats...")
-    if return_dfs:
-        dfs.append(passing_type_stats(start_year=start_year, return_df=True))
-    else:
-        passing_type_stats(start_year=start_year, export_format=export_format)
-
-    print("Starting to scrape playing time stats...")
-    if return_dfs:
-        dfs.append(playing_time_stats(start_year=start_year, return_df=True))
-    else:
-        playing_time_stats(start_year=start_year, export_format=export_format)
-
-    print("Starting to scrape standard stats...")
-    if return_dfs:
-        dfs.append(standard_stats(start_year=start_year, return_df=True))
-    else:
-        standard_stats(start_year=start_year, export_format=export_format)
-
-    print("Starting to scrape possession stats...")
-    if return_dfs:
-        dfs.append(possession_stats(start_year=start_year, return_df=True))
-    else:
-        possession_stats(start_year=start_year, export_format=export_format)
-
-    print("Starting to scrape creation stats...")
-    if return_dfs:
-        dfs.append(creation_stats(start_year=start_year, return_df=True))
-    else:
-        creation_stats(start_year=start_year, export_format=export_format)
-
-    print(f"All stats for season {season_str} have been scraped.")
-    if not return_dfs and export_format:
-         print(f"Files saved with _{season_str} suffix.")
-
-
-    if return_dfs:
-        return dfs
-
-
+# --- MERGER FUNCTION ---
 def merger_5leagues(start_year=None, export_format=None, return_df=False):
-    import pandas as pd
-    import os
-    import unicodedata
-
     season_str = _get_season_string(start_year)
     print(f"Iniciando merge para la temporada: {season_str}")
 
-    player_stand_stats = standard_stats(start_year=start_year, return_df=True)
-    player_shoot_stats = shooting_stats(start_year=start_year, return_df=True)
-    player_pass_stats = passing_stats(start_year=start_year, return_df=True)
-    player_passtypes_stats = passing_type_stats(start_year=start_year, return_df=True) # No se usaba en el merge original, pero lo cargo por si acaso
-    player_ga_stats = creation_stats(start_year=start_year, return_df=True)
-    player_defense_stats = defense_stats(start_year=start_year, return_df=True)
-    player_possession_stats = possession_stats(start_year=start_year, return_df=True)
-    player_time_stats = playing_time_stats(start_year=start_year, return_df=True)
+    all_dfs = scrape_all_stats_for_merge(start_year=start_year)
 
-    # Verificar si algún DataFrame está vacío antes de hacer merge
-    dataframes_to_merge = {
-        "standard": player_stand_stats,
-        "shooting": player_shoot_stats,
-        "passing": player_pass_stats,
-        "ga": player_ga_stats,
-        "defense": player_defense_stats,
-        "possession": player_possession_stats,
-        "time": player_time_stats
-    }
+    if not all_dfs:
+        print(f"No se obtuvieron datos de ninguna tabla para {season_str}. No se puede mergear.")
+        if return_df: return pd.DataFrame()
+        return None
 
-    for name, df_check in dataframes_to_merge.items():
-        if df_check.empty:
-            print(f"Advertencia: El DataFrame '{name}' para la temporada {season_str} está vacío. El merge podría fallar o estar incompleto.")
-            # Podrías decidir devolver un DataFrame vacío o parar aquí si un df crucial está vacío
-            # Por ahora, continuará e intentará el merge.
+    # Iniciar con el primer DataFrame no vacío
+    final_merged_df = pd.DataFrame()
+    initial_df_found = False
+    for i, df in enumerate(all_dfs):
+        if not df.empty:
+            final_merged_df = df.copy()
+            initial_df_found = True
+            all_dfs = all_dfs[i+1:] # Resto de DFs para mergear
+            print(f"DataFrame inicial para merge: {type(all_dfs[0] if all_dfs else None).__name__ if all_dfs else 'N/A'} (basado en el primer DF no vacío)")
+            break
+    
+    if not initial_df_found:
+        print(f"Todos los DataFrames obtenidos están vacíos para {season_str}. No se puede mergear.")
+        if return_df: return pd.DataFrame()
+        return None
 
-    if player_stand_stats.empty:
-        print(f"El DataFrame principal 'standard_stats' está vacío para la temporada {season_str}. No se puede continuar con el merge.")
-        if return_df:
-            return pd.DataFrame()
-        return
 
-    # Unión de player_stand_stats con player_shoot_stats
-    merged_df = pd.merge(
-        player_stand_stats,
-        player_shoot_stats.drop(columns=[col for col in player_shoot_stats.columns if col in player_stand_stats.columns and col != 'PlSqu'], errors='ignore'), # Evitar duplicados excepto PlSqu
-        on='PlSqu',
-        how='inner', # Cambiar a 'left' si quieres mantener todos los jugadores de player_stand_stats
-        suffixes=('_stand', '_shoot')
-    )
-
-    # Limpieza de columnas duplicadas (una forma más genérica)
-    # Columnas base del primer DF (player_stand_stats)
-    base_cols = {col for col in player_stand_stats.columns if col != 'PlSqu'}
-
-    # Lista de DataFrames a fusionar (excluyendo el primero que es la base)
-    additional_dfs = [
-        player_pass_stats,
-        player_ga_stats,
-        player_defense_stats,
-        player_possession_stats,
-        player_time_stats,
-        player_passtypes_stats # Añadido aquí si se decide incluirlo en el merge
-    ]
-
-    current_merged_df = merged_df.copy()
-
-    for i, df_to_add in enumerate(additional_dfs):
+    for df_to_add in all_dfs:
         if df_to_add.empty:
-            print(f"Saltando merge con DataFrame vacío (índice {i}).")
+            # print(f"Omitiendo un DataFrame vacío en la lista de merge.") # Menos verboso
             continue
-        # Columnas a eliminar del df_to_add: aquellas que ya están en current_merged_df excepto 'PlSqu'
-        cols_to_drop_from_df_to_add = [col for col in df_to_add.columns if col in current_merged_df.columns and col != 'PlSqu']
-        df_cleaned = df_to_add.drop(columns=cols_to_drop_from_df_to_add, errors='ignore')
+        if 'PlSqu' in df_to_add.columns and 'PlSqu' in final_merged_df.columns:
+            cols_to_drop_from_new_df = [c for c in df_to_add.columns if c in final_merged_df.columns and c != 'PlSqu']
+            # Asegurar que no se dropea 'PlSqu' si es la única columna común
+            if 'PlSqu' in cols_to_drop_from_new_df : cols_to_drop_from_new_df.remove('PlSqu')
 
-        current_merged_df = pd.merge(
-            current_merged_df,
-            df_cleaned,
-            on='PlSqu',
-            how='inner', # O 'left' sobre current_merged_df si se prefiere
-            suffixes=(f'_df{i}', f'_df{i+1}') # Sufijos genéricos para evitar colisiones, se limpiarán después
-        )
-        if current_merged_df.empty and not df_cleaned.empty:
-             print(f"Advertencia: El merge con el DataFrame (índice {i}) resultó en un DataFrame vacío. Verificar 'PlSqu' IDs.")
+            df_cleaned = df_to_add.drop(columns=cols_to_drop_from_new_df, errors='ignore')
 
+            if not df_cleaned.empty:
+                # print(f"Mergeando con DataFrame que tiene columnas: {list(df_cleaned.columns[:5])}...") # Debug
+                # Antes del merge, verificar si 'PlSqu' está vacío o tiene NaNs y cuántos
+                # if df_cleaned['PlSqu'].isnull().any(): print(f"Advertencia: 'PlSqu' en df_cleaned tiene {df_cleaned['PlSqu'].isnull().sum()} NaNs antes del merge.")
+                # if final_merged_df['PlSqu'].isnull().any(): print(f"Advertencia: 'PlSqu' en final_merged_df tiene {final_merged_df['PlSqu'].isnull().sum()} NaNs antes del merge.")
+                
+                final_merged_df = pd.merge(final_merged_df, df_cleaned, on='PlSqu', how='inner')
+                # print(f"Tamaño después del merge: {final_merged_df.shape}") # Debug
+            else:
+                print(f"Advertencia: Un DataFrame intermedio quedó vacío después de limpiar columnas duplicadas (excepto PlSqu) y fue omitido.")
+        else:
+            print(f"Advertencia: Un DataFrame intermedio no contiene 'PlSqu' (o el principal no lo tiene) y fue omitido del merge.")
 
-    final_merged_df = current_merged_df.copy()
-
-    # Eliminar columnas de unión redundantes que no sean 'PlSqu' y las auxiliares de merge
-    # Por ejemplo, si Player_shoot, Squad_shoot etc. se crearon y no se quieren.
-    # Esto es más complejo de generalizar sin conocer todos los nombres exactos post-merge.
-    # La lógica original de drop por sufijos era más específica.
-    # Reimplementando la lógica de drop específica post-merge:
-
-    # Columnas a eliminar si tienen sufijos y la base ya existe
-    def drop_suffixed_duplicates(df, base_df_cols, suffix):
-        cols_to_drop = [col for col in df.columns if col.endswith(suffix) and col[:-len(suffix)] in base_df_cols]
-        return df.drop(columns=cols_to_drop, errors='ignore')
-
-    # Después del primer merge (stand y shoot)
-    # Las columnas de player_stand_stats son la base. Si player_shoot_stats tenía 'Player', 'Squad', etc., se renombran con _shoot
-    # La lógica original era:
-    # columns_to_drop = [col for col in merged_df.columns if col.endswith('_shoot') and col[:-6] in player_stand_stats.columns]
-    # merged_df = merged_df.drop(columns=columns_to_drop)
-    # merged_df.columns = [col.replace('_stand', '') for col in merged_df.columns]
-
-    # Esta parte es compleja porque los sufijos de pd.merge se aplican a TODAS las columnas que colisionan,
-    # no solo a las que no son la clave de unión.
-    # El enfoque original de merge y luego drop de columnas con sufijos específicos es probablemente más robusto
-    # si se conocen los DataFrames.
-
-    # Reintentando la secuencia de merge original con la limpieza adecuada:
-    final_merged_df = player_stand_stats.copy()
-
-    # Merge con player_shoot_stats
-    if not player_shoot_stats.empty:
-        cols_from_shoot_to_drop = [c for c in player_shoot_stats.columns if c in final_merged_df.columns and c != 'PlSqu']
-        final_merged_df = pd.merge(final_merged_df, player_shoot_stats.drop(columns=cols_from_shoot_to_drop, errors='ignore'), on='PlSqu', how='inner')
-
-    # Merge con player_pass_stats
-    if not player_pass_stats.empty:
-        cols_from_pass_to_drop = [c for c in player_pass_stats.columns if c in final_merged_df.columns and c != 'PlSqu']
-        final_merged_df = pd.merge(final_merged_df, player_pass_stats.drop(columns=cols_from_pass_to_drop, errors='ignore'), on='PlSqu', how='inner')
-
-    # Merge con player_ga_stats
-    if not player_ga_stats.empty:
-        cols_from_ga_to_drop = [c for c in player_ga_stats.columns if c in final_merged_df.columns and c != 'PlSqu']
-        final_merged_df = pd.merge(final_merged_df, player_ga_stats.drop(columns=cols_from_ga_to_drop, errors='ignore'), on='PlSqu', how='inner')
-
-    # Merge con player_defense_stats
-    if not player_defense_stats.empty:
-        cols_from_defense_to_drop = [c for c in player_defense_stats.columns if c in final_merged_df.columns and c != 'PlSqu']
-        final_merged_df = pd.merge(final_merged_df, player_defense_stats.drop(columns=cols_from_defense_to_drop, errors='ignore'), on='PlSqu', how='inner')
-
-    # Merge con player_possession_stats
-    if not player_possession_stats.empty:
-        cols_from_possession_to_drop = [c for c in player_possession_stats.columns if c in final_merged_df.columns and c != 'PlSqu']
-        final_merged_df = pd.merge(final_merged_df, player_possession_stats.drop(columns=cols_from_possession_to_drop, errors='ignore'), on='PlSqu', how='inner')
-
-    # Merge con player_time_stats
-    if not player_time_stats.empty:
-        cols_from_time_to_drop = [c for c in player_time_stats.columns if c in final_merged_df.columns and c != 'PlSqu']
-        final_merged_df = pd.merge(final_merged_df, player_time_stats.drop(columns=cols_from_time_to_drop, errors='ignore'), on='PlSqu', how='inner')
-
-    # Merge con player_passtypes_stats (si se va a incluir)
-    if not player_passtypes_stats.empty:
-        cols_from_passtypes_to_drop = [c for c in player_passtypes_stats.columns if c in final_merged_df.columns and c != 'PlSqu']
-        final_merged_df = pd.merge(final_merged_df, player_passtypes_stats.drop(columns=cols_from_passtypes_to_drop, errors='ignore'), on='PlSqu', how='inner')
-
-
-    # --- Limpieza final aplicada al final_merged_df ---
     if final_merged_df.empty:
-        print(f"El DataFrame fusionado final está vacío para la temporada {season_str}. No se aplicará limpieza adicional.")
+        print(f"El DataFrame fusionado (antes de maestro) está vacío para {season_str}.")
     else:
+        print(f"DataFrame fusionado (antes de maestro) tiene {final_merged_df.shape[0]} filas y {final_merged_df.shape[1]} columnas.")
+        # --- Limpieza de Datos Post-Merge (Naciones, Comp, Edad) ---
         nation_mapping = {
             'eng': 'England', 'es': 'Spain', 'ie': 'Ireland', 'fr': 'France', 'ma': 'Morocco',
             'dz': 'Algeria', 'eg': 'Egypt', 'tn': 'Tunisia', 'sa': 'Saudi Arabia', 'dk': 'Denmark',
@@ -756,83 +312,125 @@ def merger_5leagues(start_year=None, export_format=None, return_df=False):
             'ir': 'Iran', 'mt': 'Malta'
         }
         if 'Nation' in final_merged_df.columns:
-            final_merged_df.loc[:,'Nation'] = final_merged_df['Nation'].astype(str).str.extract(r'^(\w+)')[0].str.lower()
-            final_merged_df.loc[:,'Nation'] = final_merged_df['Nation'].map(nation_mapping)
-        else:
-            print("Advertencia: Columna 'Nation' no encontrada en el DataFrame fusionado.")
-
+            extracted_nation_code = final_merged_df['Nation'].astype(str).str.extract(r'^(\w+)')[0].str.lower()
+            final_merged_df['Nation'] = extracted_nation_code.map(nation_mapping).fillna(extracted_nation_code)
 
         if 'Comp' in final_merged_df.columns:
-            final_merged_df.loc[:,'Comp'] = final_merged_df['Comp'].astype(str).str.extract(r'^\w+\s+(.*)')[0]
-        else:
-            print("Advertencia: Columna 'Comp' no encontrada en el DataFrame fusionado.")
-
+            final_merged_df['Comp'] = final_merged_df['Comp'].astype(str).str.extract(r'^\w+\s+(.*)')[0].fillna(final_merged_df['Comp'])
 
         def edad_a_decimal(edad_str):
-            if pd.isnull(edad_str):
-                return None
+            if pd.isnull(edad_str): return None
             try:
                 partes = str(edad_str).split('-')
                 años = int(partes[0])
-                dias = int(partes[1]) if len(partes) > 1 else 0 # Manejar edad sin días
+                dias = int(partes[1]) if len(partes) > 1 else 0
                 return round(años + dias / 365, 2)
-            except:
-                return None # O np.nan si se prefiere
+            except ValueError:
+                try: return int(edad_str)
+                except: return None
+            except Exception: return None
 
         if 'Age' in final_merged_df.columns:
-            final_merged_df.loc[:,'DecimalAge'] = final_merged_df['Age'].apply(edad_a_decimal)
-        else:
-            print("Advertencia: Columna 'Age' no encontrada en el DataFrame fusionado.")
+            final_merged_df['DecimalAge'] = final_merged_df['Age'].apply(edad_a_decimal)
+        else: print("Advertencia: Columna 'Age' no encontrada para DecimalAge.")
 
-
+        # --- Merge con DataFrame Maestro (players.csv) ---
+        print("Intentando merge con players.csv...")
         try:
-            df_maestro = pd.read_csv("https://raw.githubusercontent.com/Josegra/Football_Scraper/main/players.csv")
+            def generar_player_code_para_fbref(nombre_fbref):
+                if pd.notnull(nombre_fbref) and str(nombre_fbref).strip():
+                    s = str(nombre_fbref).lower().strip().replace("'", "")
+                    return unidecode(s.replace(' ', '-'))
+                return None
+
+            if 'Player' in final_merged_df.columns:
+                final_merged_df['player_code'] = final_merged_df['Player'].apply(generar_player_code_para_fbref)
+            else:
+                print("Advertencia: Columna 'Player' no en final_merged_df. No se puede generar 'player_code' para el cruce.")
+                final_merged_df['player_code'] = pd.Series(dtype='object')
+
+            df_maestro_raw = pd.read_csv("https://raw.githubusercontent.com/Josegra/Football_Scraper/main/players.csv")
+            df_maestro = df_maestro_raw.copy()
+            
+            # ASUNCIÓN: Generar 'player_code' en df_maestro si no existe o para asegurar consistencia
+            if 'name' in df_maestro.columns: # Asumiendo que 'name' es la columna de nombres en players.csv
+                 df_maestro['player_code'] = df_maestro['name'].apply(generar_player_code_para_fbref)
+            elif 'player_code' not in df_maestro.columns:
+                print("Error crítico: 'players.csv' no tiene columna 'name' para generar 'player_code', ni 'player_code' preexistente.")
+                # No continuar con este merge si no hay clave
+            
+            if 'player_code' in df_maestro.columns and 'player_code' in final_merged_df.columns:
+                columnas_maestro_seleccionadas = [
+                    'player_code', 'sub_position', 'current_club_name',
+                    'market_value_in_eur', 'last_season',
+                    'foot', 'height_in_cm', 'contract_expiration_date'
+                ]
+                columnas_maestro_existentes = [col for col in columnas_maestro_seleccionadas if col in df_maestro.columns]
+                
+                if 'player_code' not in columnas_maestro_existentes: # Doble check por si player_code fue droppeado o no seleccionado
+                    print("Error Crítico: 'player_code' no está en las columnas seleccionadas del maestro para el cruce.")
+                else:
+                    df_maestro_filtrado = df_maestro[columnas_maestro_existentes].drop_duplicates(subset='player_code', keep='first')
+                    
+                    # Antes de mergear, verificar valores únicos y duplicados en 'player_code'
+                    # print(f"Debug: player_code unique in final_merged_df: {final_merged_df['player_code'].nunique()} / {len(final_merged_df)}")
+                    # print(f"Debug: player_code unique in df_maestro_filtrado: {df_maestro_filtrado['player_code'].nunique()} / {len(df_maestro_filtrado)}")
+
+                    final_merged_df = final_merged_df.merge(
+                        df_maestro_filtrado,
+                        on='player_code',
+                        how='left',
+                        suffixes=('', '_maestro')
+                    )
+                    cols_a_consolidar = list(set(columnas_maestro_existentes) - {'player_code'})
+                    for col_base in cols_a_consolidar:
+                        if col_base + '_maestro' in final_merged_df.columns:
+                            # Priorizar la información del maestro si existe, sino mantener la original (si la hubiera con el mismo nombre)
+                            final_merged_df[col_base] = final_merged_df[col_base + '_maestro'].fillna(final_merged_df.get(col_base))
+                            final_merged_df.drop(columns=[col_base + '_maestro'], inplace=True, errors='ignore')
+                        # Si la columna base original no existía y ahora sí (traída del maestro), está bien.
+                        # Si existía y no hubo colisión (no se creó _maestro), también está bien.
+                    print("Cruce con archivo maestro realizado correctamente.")
+            else:
+                 print("Error: 'player_code' no está disponible en ambos DataFrames para el cruce con el maestro.")
+
+        except FileNotFoundError:
+            print("Error: players.csv no encontrado en la URL especificada.")
+        except KeyError as ke:
+            print(f"Error: columna faltante durante el merge o preparación del maestro: {ke}")
         except Exception as e:
-            print(f"No se pudo cargar el archivo maestro de jugadores: {e}. No se agregarán sub-posiciones.")
-            df_maestro = pd.DataFrame(columns=['name_norm', 'sub_position']) # Crear df vacío para evitar errores
+            print(f"Error inesperado durante el merge con el maestro: {e}")
 
+    # --- INICIO: Conversión a formato numérico adecuado ---
+    if not final_merged_df.empty:
+        print("Convirtiendo columnas a formato numérico adecuado...")
+        exclude_cols = [
+            'Player', 'Nation', 'Pos', 'Squad', 'Comp', 'Born', 'foot',
+            'contract_expiration_date', 'player_code', 'sub_position', 'current_club_name',
+            'PlSqu',  # Clave de string usada para merges internos
+            'Age'     # Columna original de edad tipo string "YY-DDD", DecimalAge es la numérica
+        ]
 
-        def normalizar_nombre(nombre):
-            if pd.isnull(nombre):
-                return ""
-            nombre = unicodedata.normalize('NFKD', str(nombre)).encode('ASCII', 'ignore').decode('utf-8')
-            return nombre.lower().strip()
+        for col in final_merged_df.columns:
+            if col not in exclude_cols:
+                # Comprobar si la columna es de tipo objeto o string antes de convertir
+                # para evitar intentar convertir columnas ya numéricas innecesariamente
+                # o columnas de fecha/hora que podrían necesitar un manejo diferente (aunque pd.to_numeric las pasaría a NaN con coerce)
+                if final_merged_df[col].dtype == 'object' or pd.api.types.is_string_dtype(final_merged_df[col]):
+                    final_merged_df[col] = pd.to_numeric(final_merged_df[col], errors='coerce')
+                elif pd.api.types.is_datetime64_any_dtype(final_merged_df[col]):
+                    # Si tienes columnas de fecha/hora que no están en exclude_cols y no quieres convertirlas a NaN:
+                    # print(f"Columna {col} es de tipo fecha/hora y no está en exclude_cols. Se omitirá la conversión a numérico.")
+                    pass # O maneja específicamente
+        print("Conversión a numérico completada.")
+    elif export_format or return_df: # Solo imprimir si se esperaba una acción
+        print("DataFrame final vacío, no se realiza conversión numérica.")
+    # --- FIN: Conversión a formato numérico adecuado ---
 
-        if 'Player' in final_merged_df.columns:
-            final_merged_df.loc[:,'Player_norm'] = final_merged_df['Player'].apply(normalizar_nombre)
-        else:
-            print("Advertencia: Columna 'Player' no encontrada en el DataFrame fusionado. No se puede normalizar para merge.")
-            final_merged_df.loc[:,'Player_norm'] = "" # Columna vacía para evitar error en merge
+    # Exportar o devolver
+    if not final_merged_df.empty:
+        _export_df(final_merged_df, 'final_fbref_all5_merged_data', season_str, export_format) # Nombre de archivo actualizado
+    elif export_format: # Solo imprimir si se esperaba exportar y está vacío
+        print(f"DataFrame final vacío. No se guarda {export_format} para 'final_fbref_all5_merged_data'.")
 
-        df_maestro.loc[:,'name_norm'] = df_maestro['name'].apply(normalizar_nombre) if 'name' in df_maestro.columns else ""
-
-        df_maestro_unico = df_maestro[['name_norm', 'sub_position']].drop_duplicates(subset='name_norm') if 'name_norm' in df_maestro.columns and 'sub_position' in df_maestro.columns else pd.DataFrame(columns=['name_norm', 'sub_position'])
-
-
-        if not df_maestro_unico.empty and 'Player_norm' in final_merged_df.columns:
-             final_merged_df = final_merged_df.merge(
-                df_maestro_unico,
-                how='left',
-                left_on='Player_norm',
-                right_on='name_norm'
-            )
-             final_merged_df.drop(columns=['name_norm', 'Player_norm'], inplace=True, errors='ignore')
-        elif 'Player_norm' in final_merged_df.columns: # Player_norm existe pero df_maestro_unico está vacío
-            final_merged_df.drop(columns=['Player_norm'], inplace=True, errors='ignore')
-            print("Advertencia: df_maestro_unico está vacío, no se añaden sub-posiciones.")
-
-
-    # --- Fin limpieza final ---
-
-    if export_format == 'csv':
-        file_path = f'final_fbref_all5_columns_{season_str}.csv'
-        final_merged_df.to_csv(file_path, index=False)
-        print(f"Archivo CSV guardado en: {os.path.abspath(file_path)}")
-    elif export_format == 'excel':
-        file_path = f'final_fbref_all5_columns_{season_str}.xlsx'
-        final_merged_df.to_excel(file_path, index=False)
-        print(f"Archivo Excel guardado en: {os.path.abspath(file_path)}")
-    elif return_df:
-        return final_merged_df
-    else:
-        print("Por favor, especifica un formato de exportación ('csv' o 'excel') o selecciona return_df=True para obtener un DataFrame.")
+    return final_merged_df if return_df else None
