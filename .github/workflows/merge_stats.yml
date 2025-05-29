@@ -1,0 +1,46 @@
+name: Merge Football Stats and Update CSV
+
+on:
+  schedule:
+    # Runs every Sunday at 3:00 AM UTC
+    - cron: '0 3 * * 0'
+  workflow_dispatch: # Allows manual triggering from the Actions tab
+
+jobs:
+  merge_stats_job:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to commit changes back to the repository
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10' # Or 3.8, 3.9, 3.11, etc. (Python 3.8+ needed for walrus operator)
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas unidecode requests
+
+      - name: Run stats merger script
+        run: python Football_Scraper/stats_merger.py
+
+      - name: Commit and Push updated CSV
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Automated update: Merged football stats CSV"
+          branch: main # Or your default branch (e.g., master)
+          # This pattern will match the CSV file generated in the ./data directory
+          # e.g., data/final_fbref_all5_merged_data_2023-2024.csv
+          file_pattern: data/final_fbref_all5_merged_data_*.csv
+          commit_user_name: GitHub Actions Bot
+          commit_user_email: actions@github.com
+          commit_author: GitHub Actions Bot <actions@github.com>
+          # Optional: Add a more specific commit body
+          # commit_body: "CSV file updated by automated workflow."
+          # Optional: If you want to push to a different branch than the one checked out
+          # push_options: '--force' # Be careful with force push
