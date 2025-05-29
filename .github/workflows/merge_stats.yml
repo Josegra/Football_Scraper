@@ -27,7 +27,7 @@ jobs:
           pip install pandas unidecode requests
 
       - name: Run stats merger script
-        run: python Football_Scraper/stats_merger.py
+        run: python stats_merger.py
 
       - name: Commit and Push updated CSV
         uses: stefanzweifel/git-auto-commit-action@v5
